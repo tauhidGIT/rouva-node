@@ -1,0 +1,41 @@
+{
+  "name": "rouva",
+  "version": "0.1.0",
+  "description": "Official Node.js SDK for Rouva — managed AI gateway with intelligent routing and spend tracking",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "ai",
+    "llm",
+    "openai",
+    "anthropic",
+    "routing",
+    "gateway",
+    "rouva"
+  ],
+  "author": "Rouva <hello@rouva.io>",
+  "license": "MIT",
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}
