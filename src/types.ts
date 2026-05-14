@@ -10,10 +10,30 @@ export interface Message {
   content: string
 }
 
+/**
+ * Supported models across all providers.
+ * Omit `model` entirely to let Rouva route to the cheapest capable model automatically.
+ */
+export type RouvaModel =
+  // Anthropic
+  | 'claude-opus-4-6'
+  | 'claude-sonnet-4-6'
+  | 'claude-haiku-4-5-20251001'
+  // OpenAI
+  | 'gpt-4o'
+  | 'gpt-4o-mini'
+  | 'gpt-4-turbo'
+  | 'gpt-3.5-turbo'
+  // Allow any string for forward compatibility
+  | (string & {})
+
 export interface ChatCompletionParams {
   messages: Message[]
-  /** Target model — omit to let Rouva route intelligently */
-  model?: string
+  /**
+   * Target model — omit to let Rouva route intelligently to the cheapest capable model.
+   * Supports models from any connected provider (Anthropic, OpenAI).
+   */
+  model?: RouvaModel
   /** Maximum tokens to generate */
   max_tokens?: number
   /** Sampling temperature 0–1 */

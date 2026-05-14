@@ -5,13 +5,13 @@ Official Node.js SDK for [Rouva](https://rouva.io) — managed AI gateway with i
 ## Installation
 
 ```bash
-npm install rouva
+npm install @rouvanpm/rouva
 ```
 
 ## Quick Start
 
 ```typescript
-import { Rouva } from 'rouva'
+import { Rouva } from '@rouvanpm/rouva'
 
 const rouva = new Rouva({ apiKey: 'rva_...' })
 
@@ -20,6 +20,29 @@ const response = await rouva.chat.completions.create({
 })
 
 console.log(response.choices[0].message.content)
+```
+
+## Provider agnostic
+
+Rouva works with all connected providers — Anthropic and OpenAI today, more coming. You can request a specific model or omit it entirely and let Rouva route to the cheapest capable model automatically.
+
+```typescript
+// Request a specific model
+const res = await rouva.chat.completions.create({
+  model: 'gpt-4o',
+  messages,
+})
+
+// Request a specific Anthropic model
+const res = await rouva.chat.completions.create({
+  model: 'claude-sonnet-4-6',
+  messages,
+})
+
+// Let Rouva decide — routes to cheapest model for the task
+const res = await rouva.chat.completions.create({
+  messages,
+})
 ```
 
 ## Drop-in replacement for OpenAI
@@ -31,7 +54,7 @@ const openai = new OpenAI({ apiKey: '...' })
 const res = await openai.chat.completions.create({ messages, model: 'gpt-4o' })
 
 // After — Rouva routes to the cheapest capable model automatically
-import { Rouva } from 'rouva'
+import { Rouva } from '@rouvanpm/rouva'
 const rouva = new Rouva({ apiKey: 'rva_...' })
 const res = await rouva.chat.completions.create({ messages })
 ```
