@@ -1,6 +1,6 @@
 {
   "name": "@rouvanpm/rouva",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Official Node.js SDK for Rouva — managed AI gateway with intelligent routing and spend tracking",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
