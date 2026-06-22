@@ -2,6 +2,7 @@ export { Rouva } from './client'
 export type {
   RouvaOptions,
   Message,
+  RouvaProvider,
   ChatCompletionParams,
   ChatCompletion,
   ChatCompletionChoice,

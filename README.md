@@ -24,7 +24,7 @@ console.log(response.choices[0].message.content)
 
 ## Provider agnostic
 
-Rouva works with all connected providers — Anthropic and OpenAI today, more coming. You can request a specific model or omit it entirely and let Rouva route to the cheapest capable model automatically.
+Rouva works with all connected providers — Anthropic, OpenAI, Gemini, DeepSeek, and Mistral. You can request a specific model, force a specific provider, or omit both and let Rouva route to the cheapest capable model automatically.
 
 ```typescript
 // Request a specific model
@@ -33,9 +33,10 @@ const res = await rouva.chat.completions.create({
   messages,
 })
 
-// Request a specific Anthropic model
+// Force a specific provider + model
 const res = await rouva.chat.completions.create({
-  model: 'claude-sonnet-4-6',
+  provider: 'gemini',
+  model: 'gemini-2.5-pro',
   messages,
 })
 
@@ -45,7 +46,7 @@ const res = await rouva.chat.completions.create({
 })
 ```
 
-## Drop-in replacement for OpenAI
+## OpenAI-style request shape
 
 ```typescript
 // Before
@@ -77,6 +78,8 @@ while (true) {
 }
 ```
 
+Streaming responses are normalized to OpenAI-style SSE chunks, even when Rouva routes the request to Anthropic.
+
 ## Options
 
 ```typescript
@@ -88,7 +91,7 @@ const rouva = new Rouva({
 
 ## Response metadata
 
-Every response includes a `_rouva` field with routing and cost details:
+Parsed non-stream responses may include a `_rouva` field with gateway header metadata when available:
 
 ```typescript
 const res = await rouva.chat.completions.create({ messages })
@@ -96,9 +99,7 @@ const res = await rouva.chat.completions.create({ messages })
 console.log(res._rouva)
 // {
 //   model_used: 'gpt-4o-mini',
-//   cost: 0.000012,
-//   savings: 0.000088,
-//   intelligently_routed: true,
+//   provider_used: 'openai',
 //   task_type: 'summarize'
 // }
 ```

@@ -3,6 +3,11 @@ import type {
   ChatCompletionParams,
   ChatCompletion,
 } from './types'
+import {
+  getRouvaMetadata,
+  normalizeGatewayStream,
+  readChatCompletionFromSse,
+} from './sse'
 
 const DEFAULT_BASE_URL = 'https://app.rouva.io'
 
@@ -41,7 +46,7 @@ export class Rouva {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
+        'Authorization': `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify(params),
     })
@@ -51,11 +56,12 @@ export class Rouva {
       throw new Error(`[Rouva] Gateway error ${res.status}: ${body}`)
     }
 
-    if (params.stream) {
-      if (!res.body) throw new Error('[Rouva] No response body for streaming request')
-      return res.body
-    }
+    if (!res.body) throw new Error('[Rouva] No response body from gateway')
 
-    return res.json() as Promise<ChatCompletion>
+    const normalizedStream = normalizeGatewayStream(res.body)
+
+    if (params.stream) return normalizedStream
+
+    return readChatCompletionFromSse(normalizedStream, getRouvaMetadata(res.headers))
   }
 }

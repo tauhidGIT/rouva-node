@@ -10,6 +10,14 @@ export interface Message {
   content: string
 }
 
+export type RouvaProvider =
+  | 'anthropic'
+  | 'openai'
+  | 'gemini'
+  | 'deepseek'
+  | 'mistral'
+  | (string & {})
+
 /**
  * Supported models across all providers.
  * Omit `model` entirely to let Rouva route to the cheapest capable model automatically.
@@ -17,8 +25,11 @@ export interface Message {
 export type RouvaModel =
   // Anthropic
   | 'claude-opus-4-6'
+  | 'claude-opus-4-7'
+  | 'claude-opus-4-8'
   | 'claude-sonnet-4-6'
   | 'claude-haiku-4-5-20251001'
+  | 'claude-fable-5'
   // OpenAI — GPT-5 family
   | 'gpt-5-nano'
   | 'gpt-5-mini'
@@ -32,6 +43,15 @@ export type RouvaModel =
   // OpenAI — GPT-4o family
   | 'gpt-4o'
   | 'gpt-4o-mini'
+  // Gemini
+  | 'gemini-2.5-flash'
+  | 'gemini-2.5-pro'
+  // DeepSeek
+  | 'deepseek-chat'
+  | 'deepseek-reasoner'
+  // Mistral
+  | 'mistral-small-latest'
+  | 'mistral-large-latest'
   // Allow any string for forward compatibility
   | (string & {})
 
@@ -42,6 +62,11 @@ export interface ChatCompletionParams {
    * Supports models from any connected provider (Anthropic, OpenAI).
    */
   model?: RouvaModel
+  /**
+   * Force an exact provider when paired with `model`.
+   * Omit to let Rouva auto-route based on your connected keys.
+   */
+  provider?: RouvaProvider
   /** Maximum tokens to generate */
   max_tokens?: number
   /** Sampling temperature 0–1 */
@@ -74,14 +99,12 @@ export interface ChatCompletion {
 }
 
 export interface RouvaResponseMeta {
-  /** Actual model used (may differ from requested when intelligently routed) */
-  model_used: string
-  /** USD cost for this request */
-  cost: number
-  /** USD saved vs your baseline model */
-  savings: number
-  /** Whether intelligent routing selected the model */
-  intelligently_routed: boolean
-  /** Task type classified by Rouva */
-  task_type: string
+  /** Actual model used when exposed by the gateway */
+  model_used?: string
+  /** Actual provider used when exposed by the gateway */
+  provider_used?: string
+  /** Task type classified by Rouva when exposed by the gateway */
+  task_type?: string
+  /** Semantic cache status when exposed by the gateway */
+  cache?: string
 }
