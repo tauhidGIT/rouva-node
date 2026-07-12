@@ -3,6 +3,7 @@ export type {
   RouvaOptions,
   Message,
   RouvaProvider,
+  SystemTextBlock,
   ChatCompletionParams,
   ChatCompletion,
   ChatCompletionChoice,

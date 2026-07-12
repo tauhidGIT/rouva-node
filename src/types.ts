@@ -55,8 +55,21 @@ export type RouvaModel =
   // Allow any string for forward compatibility
   | (string & {})
 
+/** Anthropic-style text block — the array form of the `system` param */
+export interface SystemTextBlock {
+  type: 'text'
+  text: string
+}
+
 export interface ChatCompletionParams {
   messages: Message[]
+  /**
+   * System prompt — a plain string or Anthropic-style text blocks.
+   * Equivalent to a `role: "system"` message at the head of `messages`;
+   * the gateway accepts both forms and re-emits whichever dialect the
+   * routed provider expects, so it survives cross-provider routing.
+   */
+  system?: string | SystemTextBlock[]
   /**
    * Target model — omit to let Rouva route intelligently to the cheapest capable model.
    * Supports models from any connected provider (Anthropic, OpenAI).
