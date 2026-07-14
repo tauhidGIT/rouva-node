@@ -183,3 +183,51 @@ describe('Rouva SDK client', () => {
     expect(text).toContain('data: [DONE]')
   })
 })
+
+describe('wire body', () => {
+  beforeEach(() => {
+    fetchMock.mockReset()
+  })
+
+  function mockSse() {
+    fetchMock.mockResolvedValue(new Response(streamFrom('data: [DONE]\n\n'), {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+  }
+
+  function sentBody(): Record<string, unknown> {
+    return JSON.parse(fetchMock.mock.calls[0][1].body)
+  }
+
+  it('never sends stream: false to the gateway (it would be rejected)', async () => {
+    mockSse()
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    await rouva.chat.completions.create({
+      messages: [{ role: 'user', content: 'hi' }],
+      stream: false,
+    })
+    expect(sentBody()).not.toHaveProperty('stream')
+  })
+
+  it('never sends stream: true to the gateway either', async () => {
+    mockSse()
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    await rouva.chat.completions.create({
+      messages: [{ role: 'user', content: 'hi' }],
+      stream: true,
+    })
+    expect(sentBody()).not.toHaveProperty('stream')
+  })
+
+  it('forwards temperature and max_tokens to the gateway', async () => {
+    mockSse()
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    await rouva.chat.completions.create({
+      messages: [{ role: 'user', content: 'hi' }],
+      temperature: 0.4,
+      max_tokens: 512,
+    })
+    expect(sentBody()).toMatchObject({ temperature: 0.4, max_tokens: 512 })
+  })
+})

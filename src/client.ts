@@ -42,13 +42,18 @@ export class Rouva {
   ): Promise<ChatCompletion | ReadableStream> {
     const url = `${this.baseURL}/api/gateway/messages`
 
+    // `stream` is a client-side toggle (return the raw stream vs a buffered
+    // completion) — the gateway always responds with SSE and rejects
+    // `stream: false`, so it must never reach the wire.
+    const { stream: _stream, ...body } = params
+
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify(params),
+      body: JSON.stringify(body),
     })
 
     if (!res.ok) {

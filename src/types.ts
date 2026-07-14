@@ -16,6 +16,9 @@ export type RouvaProvider =
   | 'gemini'
   | 'deepseek'
   | 'mistral'
+  | 'moonshot'
+  | 'xai'
+  | 'zai'
   | (string & {})
 
 /**
@@ -28,14 +31,14 @@ export type RouvaModel =
   | 'claude-opus-4-7'
   | 'claude-opus-4-8'
   | 'claude-sonnet-4-6'
+  | 'claude-sonnet-5'
   | 'claude-haiku-4-5-20251001'
   | 'claude-fable-5'
   // OpenAI — GPT-5 family
   | 'gpt-5-nano'
   | 'gpt-5-mini'
   | 'gpt-5'
-  | 'gpt-5.5'
-  | 'gpt-5.5-pro'
+  | 'gpt-5.6'
   // OpenAI — GPT-4.1 family
   | 'gpt-4.1-nano'
   | 'gpt-4.1-mini'
@@ -47,11 +50,21 @@ export type RouvaModel =
   | 'gemini-2.5-flash'
   | 'gemini-2.5-pro'
   // DeepSeek
-  | 'deepseek-chat'
-  | 'deepseek-reasoner'
+  | 'deepseek-v4-flash'
+  | 'deepseek-v4-flash-think'
+  | 'deepseek-v4-pro'
   // Mistral
   | 'mistral-small-latest'
   | 'mistral-large-latest'
+  // Moonshot
+  | 'kimi-k2.6'
+  // xAI
+  | 'grok-4.3'
+  | 'grok-4.20-0309-reasoning'
+  | 'grok-4.5'
+  // Z.ai
+  | 'glm-4.7-flash'
+  | 'glm-5.2'
   // Allow any string for forward compatibility
   | (string & {})
 
@@ -82,9 +95,17 @@ export interface ChatCompletionParams {
   provider?: RouvaProvider
   /** Maximum tokens to generate */
   max_tokens?: number
-  /** Sampling temperature 0–1 */
+  /**
+   * Sampling temperature 0–1.
+   * Note: reasoning models (gpt-5 family) only support their default
+   * temperature, so the gateway omits it for those.
+   */
   temperature?: number
-  /** Stream the response */
+  /**
+   * Stream the response. Client-side only — controls whether `create()`
+   * returns a ReadableStream or a buffered ChatCompletion; never sent to
+   * the gateway.
+   */
   stream?: boolean
 }
 
