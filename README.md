@@ -24,7 +24,7 @@ console.log(response.choices[0].message.content)
 
 ## Provider agnostic
 
-Rouva works with all connected providers — Anthropic, OpenAI, Gemini, DeepSeek, and Mistral. You can request a specific model, force a specific provider, or omit both and let Rouva route to the cheapest capable model automatically.
+Rouva works with all connected providers — Anthropic, OpenAI, Gemini, DeepSeek, Mistral, Moonshot, xAI, and Z.ai. You can request a specific model, force a specific provider, or omit both and let Rouva route to the cheapest capable model automatically.
 
 ```typescript
 // Request a specific model
@@ -79,6 +79,26 @@ while (true) {
 ```
 
 Streaming responses are normalized to OpenAI-style SSE chunks, even when Rouva routes the request to Anthropic.
+
+`stream` is a client-side toggle: `stream: true` returns the raw `ReadableStream`, omitting it (or `stream: false`) returns a buffered `ChatCompletion`. It is never sent to the gateway.
+
+## Request parameters
+
+```typescript
+const res = await rouva.chat.completions.create({
+  messages: [{ role: 'user', content: 'Write a haiku about routing.' }],
+  system: 'You are a concise assistant.',  // string or Anthropic-style text blocks
+  max_tokens: 1024,                        // default 4096
+  temperature: 0.7,                        // 0–1
+})
+```
+
+- **`temperature`** — sampling temperature between 0 and 1. Reasoning models (the gpt-5 family) only support their default temperature, so the gateway omits it when routing to one.
+- **`max_tokens`** — values below 1024 also steer auto-routing away from reasoning models, which would otherwise spend the whole budget on hidden reasoning tokens.
+
+### Not yet supported
+
+Tool use (`tools`, `tool_choice`, assistant `tool_calls`, `role: "tool"` messages) is not supported yet — the gateway rejects these with a clear 400 rather than silently dropping them. Tools support is planned.
 
 ## Options
 
