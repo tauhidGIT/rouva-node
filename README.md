@@ -96,9 +96,49 @@ const res = await rouva.chat.completions.create({
 - **`temperature`** — sampling temperature between 0 and 1. Reasoning models (the gpt-5 family) only support their default temperature, so the gateway omits it when routing to one.
 - **`max_tokens`** — values below 1024 also steer auto-routing away from reasoning models, which would otherwise spend the whole budget on hidden reasoning tokens.
 
-### Not yet supported
+## Tool use
 
-Tool use (`tools`, `tool_choice`, assistant `tool_calls`, `role: "tool"` messages) is not supported yet — the gateway rejects these with a clear 400 rather than silently dropping them. Tools support is planned.
+Tools are forwarded to your target provider verbatim — define them in the **provider's own format** (OpenAI `{ type: "function", function: {...} }` or Anthropic `{ name, description, input_schema }`) and pin the matching `model`. Tools requests are never re-routed: tool schemas are provider-specific, so `model` is required and the gateway returns a 400 without it.
+
+```typescript
+const res = await rouva.chat.completions.create({
+  model: 'gpt-4o',
+  messages: [{ role: 'user', content: 'What is the weather in SF?' }],
+  tools: [{
+    type: 'function',
+    function: {
+      name: 'get_weather',
+      description: 'Get current weather for a city',
+      parameters: {
+        type: 'object',
+        properties: { city: { type: 'string' } },
+        required: ['city'],
+      },
+    },
+  }],
+})
+
+const toolCall = res.choices[0].message.tool_calls?.[0]
+if (toolCall) {
+  const args = JSON.parse(toolCall.function.arguments)
+  const weather = await getWeather(args.city)
+
+  // Send the result back — same messages array plus the tool turn
+  const followUp = await rouva.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      { role: 'user', content: 'What is the weather in SF?' },
+      res.choices[0].message,
+      { role: 'tool', content: JSON.stringify(weather), tool_call_id: toolCall.id },
+    ],
+    tools: [/* same tools every turn */],
+  })
+}
+```
+
+Responses are normalized to the OpenAI shape regardless of provider: Anthropic `tool_use` blocks arrive as `message.tool_calls` (buffered) or `delta.tool_calls` chunks (streaming), with `finish_reason: "tool_calls"`. When sending Anthropic results back, use the Anthropic dialect in your messages (`tool_result` content blocks) — message payloads pass through to the provider verbatim.
+
+Tools requests record usage and cost but no savings, and are not quality-scored or served from the semantic cache.
 
 ## Options
 
