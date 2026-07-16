@@ -1,0 +1,49 @@
+# Publishes to npm via OIDC trusted publishing — no tokens, no OTP.
+# Requires the GitHub Actions trusted publisher to be configured on
+# npmjs.com → @rouvanpm/rouva → Settings → Trusted Publisher
+# (repository: tauhidGIT/rouva-node, workflow: publish.yml).
+#
+# Release flow: merge a PR that bumps package.json version → this
+# workflow publishes it. Same-version pushes are skipped, so doc-only
+# changes to main are safe.
+name: Publish to npm
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # OIDC — required for npm trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm >= 11.5.1; node 22 bundles an older one
+      - run: npm install -g npm@latest
+
+      - run: npm ci
+
+      - run: npm test
+
+      - run: npm run build
+
+      - name: Publish if version is new
+        run: |
+          LOCAL=$(node -p "require('./package.json').version")
+          PUBLISHED=$(npm view @rouvanpm/rouva version 2>/dev/null || echo none)
+          if [ "$LOCAL" = "$PUBLISHED" ]; then
+            echo "v$LOCAL already on npm — skipping publish"
+          else
+            npm publish
+          fi
