@@ -10,6 +10,52 @@ export interface Message {
   content: string
 }
 
+/** OpenAI-dialect tool call, as emitted on assistant messages */
+export interface FunctionToolCall {
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    /** JSON-encoded arguments string */
+    arguments: string
+  }
+}
+
+/** OpenAI-dialect assistant turn that requested tool calls */
+export interface AssistantToolCallMessage {
+  role: 'assistant'
+  content: string | null
+  tool_calls: FunctionToolCall[]
+}
+
+/** OpenAI-dialect tool result turn */
+export interface ToolResultMessage {
+  role: 'tool'
+  content: string
+  tool_call_id: string
+}
+
+/**
+ * Anthropic-dialect turn whose content is an array of content blocks
+ * (e.g. `tool_use` on assistant turns, `tool_result` on user turns).
+ * Blocks are forwarded to the gateway verbatim.
+ */
+export interface ContentBlockMessage {
+  role: 'user' | 'assistant'
+  content: Array<Record<string, unknown>>
+}
+
+/**
+ * Any message the gateway accepts. Plain chat uses `Message`; tool
+ * conversations additionally use the tool-shaped variants, which are only
+ * valid when `tools` is set on the request.
+ */
+export type ChatMessage =
+  | Message
+  | AssistantToolCallMessage
+  | ToolResultMessage
+  | ContentBlockMessage
+
 export type RouvaProvider =
   | 'anthropic'
   | 'openai'
@@ -75,7 +121,7 @@ export interface SystemTextBlock {
 }
 
 export interface ChatCompletionParams {
-  messages: Message[]
+  messages: ChatMessage[]
   /**
    * System prompt — a plain string or Anthropic-style text blocks.
    * Equivalent to a `role: "system"` message at the head of `messages`;
@@ -107,11 +153,31 @@ export interface ChatCompletionParams {
    * the gateway.
    */
   stream?: boolean
+  /**
+   * Tool definitions in your target provider's own format, forwarded to the
+   * provider verbatim (OpenAI `{ type: "function", function: {...} }` or
+   * Anthropic `{ name, description, input_schema }`). Requires `model` —
+   * tool schemas are provider-specific, so tools requests are never
+   * re-routed by the gateway.
+   */
+  tools?: Array<Record<string, unknown>>
+  /**
+   * Tool choice in your target provider's own format, forwarded verbatim.
+   * Only valid alongside `tools`.
+   */
+  tool_choice?: string | Record<string, unknown>
+}
+
+/** Assistant message in a completed response; `tool_calls` present when the model requested tools */
+export interface ResponseMessage {
+  role: 'assistant'
+  content: string | null
+  tool_calls?: FunctionToolCall[]
 }
 
 export interface ChatCompletionChoice {
   index: number
-  message: Message
+  message: ResponseMessage
   finish_reason: string | null
 }
 

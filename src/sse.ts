@@ -1,7 +1,7 @@
 import type {
   ChatCompletion,
   ChatCompletionUsage,
-  Message,
+  FunctionToolCall,
   RouvaResponseMeta,
 } from './types'
 
@@ -20,6 +20,9 @@ interface NormalizationState {
   completionTokens: number
   roleEmitted: boolean
   finalChunkEmitted: boolean
+  /** Anthropic content_block index → OpenAI tool_calls index */
+  toolCallIndexByBlock: Record<number, number>
+  nextToolCallIndex: number
 }
 
 function parseSseEvent(line: string): ParsedSseEvent | null {
@@ -55,6 +58,7 @@ function toFinishReason(stopReason: string | null | undefined): string | null {
   if (!stopReason) return null
   if (stopReason === 'end_turn' || stopReason === 'stop_sequence') return 'stop'
   if (stopReason === 'max_tokens') return 'length'
+  if (stopReason === 'tool_use') return 'tool_calls'
   return stopReason
 }
 
@@ -68,6 +72,8 @@ function initialState(): NormalizationState {
     completionTokens: 0,
     roleEmitted: false,
     finalChunkEmitted: false,
+    toolCallIndexByBlock: {},
+    nextToolCallIndex: 0,
   }
 }
 
@@ -97,8 +103,52 @@ function normalizeAnthropicPayload(
     }
   }
 
+  // Anthropic announces each tool call in a content_block_start, then streams
+  // its arguments as input_json_delta fragments. Re-emit both as OpenAI
+  // delta.tool_calls chunks so callers see one dialect regardless of provider.
+  if (eventType === 'content_block_start') {
+    const block = (payload.content_block ?? {}) as Record<string, unknown>
+    const blockIndex = typeof payload.index === 'number' ? payload.index : null
+    if (block.type === 'tool_use' && blockIndex !== null) {
+      const toolCallIndex = state.nextToolCallIndex++
+      state.toolCallIndexByBlock[blockIndex] = toolCallIndex
+
+      if (!state.roleEmitted) {
+        chunks.push(stringifySse({
+          id: state.id,
+          object: 'chat.completion.chunk',
+          created: state.created,
+          model: state.model,
+          choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
+        }))
+        state.roleEmitted = true
+      }
+
+      chunks.push(stringifySse({
+        id: state.id,
+        object: 'chat.completion.chunk',
+        created: state.created,
+        model: state.model,
+        choices: [{
+          index: 0,
+          delta: {
+            tool_calls: [{
+              index: toolCallIndex,
+              id: typeof block.id === 'string' ? block.id : `call_${toolCallIndex}`,
+              type: 'function',
+              function: { name: typeof block.name === 'string' ? block.name : '', arguments: '' },
+            }],
+          },
+          finish_reason: null,
+        }],
+      }))
+    }
+  }
+
   if (eventType === 'content_block_delta') {
     const delta = (payload.delta ?? {}) as Record<string, unknown>
+    const blockIndex = typeof payload.index === 'number' ? payload.index : null
+
     if (delta.type === 'text_delta' && typeof delta.text === 'string') {
       if (!state.roleEmitted) {
         chunks.push(stringifySse({
@@ -117,6 +167,30 @@ function normalizeAnthropicPayload(
         created: state.created,
         model: state.model,
         choices: [{ index: 0, delta: { content: delta.text }, finish_reason: null }],
+      }))
+    }
+
+    if (
+      delta.type === 'input_json_delta' &&
+      typeof delta.partial_json === 'string' &&
+      blockIndex !== null &&
+      state.toolCallIndexByBlock[blockIndex] !== undefined
+    ) {
+      chunks.push(stringifySse({
+        id: state.id,
+        object: 'chat.completion.chunk',
+        created: state.created,
+        model: state.model,
+        choices: [{
+          index: 0,
+          delta: {
+            tool_calls: [{
+              index: state.toolCallIndexByBlock[blockIndex],
+              function: { arguments: delta.partial_json },
+            }],
+          },
+          finish_reason: null,
+        }],
       }))
     }
   }
@@ -230,9 +304,10 @@ export async function readChatCompletionFromSse(
   let id = `chatcmpl_${Date.now()}`
   let model = metadata?.model_used ?? 'unknown'
   let created = Math.floor(Date.now() / 1000)
-  let role: Message['role'] = 'assistant'
   let content = ''
   let finishReason: string | null = null
+  // Sparse by tool_calls index — fragments accumulate into each entry
+  const toolCalls: FunctionToolCall[] = []
   let usage: ChatCompletionUsage = {
     prompt_tokens: 0,
     completion_tokens: 0,
@@ -270,11 +345,27 @@ export async function readChatCompletionFromSse(
         const firstChoice = choices[0] as Record<string, unknown> | undefined
         const delta = firstChoice?.delta as Record<string, unknown> | undefined
 
-        if (delta?.role === 'assistant') {
-          role = 'assistant'
-        }
         if (typeof delta?.content === 'string') {
           content += delta.content
+        }
+
+        // Assemble chunked tool_calls: the first fragment for an index carries
+        // id/type/name, subsequent fragments append argument text.
+        const deltaToolCalls = Array.isArray(delta?.tool_calls) ? delta.tool_calls : []
+        for (const raw of deltaToolCalls) {
+          const tc = raw as Record<string, unknown>
+          const index = typeof tc.index === 'number' ? tc.index : 0
+          const fn = (tc.function ?? {}) as Record<string, unknown>
+
+          const existing = toolCalls[index] ?? {
+            id: '',
+            type: 'function' as const,
+            function: { name: '', arguments: '' },
+          }
+          if (typeof tc.id === 'string' && tc.id) existing.id = tc.id
+          if (typeof fn.name === 'string' && fn.name) existing.function.name = fn.name
+          if (typeof fn.arguments === 'string') existing.function.arguments += fn.arguments
+          toolCalls[index] = existing
         }
         if (typeof firstChoice?.finish_reason === 'string' || firstChoice?.finish_reason === null) {
           finishReason = firstChoice.finish_reason as string | null
@@ -300,6 +391,7 @@ export async function readChatCompletionFromSse(
     reader.releaseLock()
   }
 
+  const assembledToolCalls = toolCalls.filter(Boolean)
   const response: ChatCompletion = {
     id,
     object: 'chat.completion',
@@ -308,7 +400,12 @@ export async function readChatCompletionFromSse(
     choices: [
       {
         index: 0,
-        message: { role, content },
+        message: {
+          role: 'assistant',
+          // OpenAI convention: content is null on pure tool-call turns
+          content: content || (assembledToolCalls.length > 0 ? null : ''),
+          ...(assembledToolCalls.length > 0 ? { tool_calls: assembledToolCalls } : {}),
+        },
         finish_reason: finishReason,
       },
     ],
