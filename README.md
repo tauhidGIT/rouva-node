@@ -136,7 +136,9 @@ if (toolCall) {
 }
 ```
 
-Responses are normalized to the OpenAI shape regardless of provider: Anthropic `tool_use` blocks arrive as `message.tool_calls` (buffered) or `delta.tool_calls` chunks (streaming), with `finish_reason: "tool_calls"`. When sending Anthropic results back, use the Anthropic dialect in your messages (`tool_result` content blocks) — message payloads pass through to the provider verbatim.
+Responses are normalized to the OpenAI shape regardless of provider: Anthropic `tool_use` blocks arrive as `message.tool_calls` (buffered) or `delta.tool_calls` chunks (streaming), with Anthropic's `stop_reason: "tool_use"` mapped to `finish_reason: "tool_calls"`. When sending Anthropic results back, use the Anthropic dialect in your messages (`tool_result` content blocks) — message payloads pass through to the provider verbatim.
+
+**Don't branch on `finish_reason` to detect tool calls** — check for the presence of `message.tool_calls` instead. `finish_reason` follows each provider's own semantics, and OpenAI notably returns `"stop"` (not `"tool_calls"`) when `tool_choice` forces a specific function. The SDK passes OpenAI's values through unchanged so behavior matches calling OpenAI directly.
 
 Tools requests record usage and cost but no savings, and are not quality-scored or served from the semantic cache.
 
