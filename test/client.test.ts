@@ -389,3 +389,28 @@ describe('tool calls in responses', () => {
     })
   })
 })
+
+describe('sampling params', () => {
+  beforeEach(() => {
+    fetchMock.mockReset()
+  })
+
+  it('forwards top_p, stop, and seed to the gateway verbatim', async () => {
+    fetchMock.mockResolvedValue(new Response(streamFrom('data: [DONE]\n\n'), {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    await rouva.chat.completions.create({
+      messages: [{ role: 'user', content: 'hi' }],
+      model: 'gpt-4o-mini',
+      top_p: 0.9,
+      stop: ['END'],
+      seed: 42,
+    })
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.top_p).toBe(0.9)
+    expect(body.stop).toEqual(['END'])
+    expect(body.seed).toBe(42)
+  })
+})

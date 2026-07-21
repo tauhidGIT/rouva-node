@@ -70,6 +70,12 @@ export type RouvaProvider =
 /**
  * Supported models across all providers.
  * Omit `model` entirely to let Rouva route to the cheapest capable model automatically.
+ *
+ * IDs not listed here also work when pinned — dated snapshots
+ * (`gpt-4o-mini-2024-07-18`), fine-tunes (`ft:gpt-4o-mini:…`), and new
+ * releases are matched to their provider by naming convention and forwarded
+ * as-is. Until the gateway's registry knows their pricing, such requests are
+ * logged with token counts but zero cost.
  */
 export type RouvaModel =
   // Anthropic
@@ -147,6 +153,25 @@ export interface ChatCompletionParams {
    * temperature, so the gateway omits it for those.
    */
   temperature?: number
+  /**
+   * Nucleus sampling — greater than 0 and at most 1, forwarded to every
+   * provider. `top_p: 1` (the no-op default) is treated as omitted. OpenAI
+   * reasoning models (gpt-5 family, o-series) don't support it: auto-routing
+   * avoids them when top_p is set, and pinning one returns a 400.
+   */
+  top_p?: number
+  /**
+   * Up to 4 stop sequences — a string or array of non-empty strings,
+   * forwarded to every provider (Anthropic receives them as
+   * `stop_sequences`).
+   */
+  stop?: string | string[]
+  /**
+   * Best-effort deterministic sampling. Only OpenAI honors it, so it
+   * requires an OpenAI `model` and pins the request to that exact model —
+   * no cheaper-model substitution, no cross-provider fallbacks.
+   */
+  seed?: number
   /**
    * Stream the response. Client-side only — controls whether `create()`
    * returns a ReadableStream or a buffered ChatCompletion; never sent to

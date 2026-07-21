@@ -86,15 +86,32 @@ Streaming responses are normalized to OpenAI-style SSE chunks, even when Rouva r
 
 ```typescript
 const res = await rouva.chat.completions.create({
+  model: 'gpt-4o-mini',                    // required when using seed (OpenAI only)
   messages: [{ role: 'user', content: 'Write a haiku about routing.' }],
   system: 'You are a concise assistant.',  // string or Anthropic-style text blocks
   max_tokens: 1024,                        // default 4096
   temperature: 0.7,                        // 0–1
+  top_p: 0.9,                              // nucleus sampling, (0, 1]
+  stop: ['END'],                           // up to 4 stop sequences
+  seed: 42,                                // pins the request to this exact model
 })
 ```
 
 - **`temperature`** — sampling temperature between 0 and 1. Reasoning models (the gpt-5 family) only support their default temperature, so the gateway omits it when routing to one.
 - **`max_tokens`** — values below 1024 also steer auto-routing away from reasoning models, which would otherwise spend the whole budget on hidden reasoning tokens.
+- **`top_p`** — nucleus sampling, forwarded to every provider; `top_p: 1` is treated as omitted. OpenAI reasoning models don't support it: auto-routing avoids them when it's set, and pinning one returns a 400.
+- **`stop`** — a string or up to 4 stop sequences, forwarded to every provider (Anthropic receives them as `stop_sequences`).
+- **`seed`** — best-effort deterministic sampling. Only OpenAI honors it, so it requires an OpenAI `model` and pins the request to that exact model (no routing, no fallbacks).
+
+Unsupported OpenAI options (`response_format`, `logit_bias`, `n > 1`, the legacy `functions`/`function_call` fields, …) are rejected by the gateway with an explicit 400 rather than silently ignored.
+
+## Unlisted models
+
+Model IDs beyond the typed union also work when pinned — dated snapshots (`gpt-4o-mini-2024-07-18`), fine-tunes (`ft:gpt-4o-mini:…`), and newly released models are matched to their provider by naming convention and forwarded as-is. Until the gateway's pricing registry knows them, the dashboard records their token counts with zero cost.
+
+## OpenAI-compatible endpoint
+
+Using the OpenAI SDK (or LangChain, the Vercel AI SDK, …) instead of this one? The gateway is also served at `POST /v1/chat/completions` — point `baseURL` at `https://app.rouva.io/v1` with your `rva_` key and it behaves exactly like OpenAI: `model` is required and always honored (no substitution), responses are buffered JSON unless `stream: true`, and only OpenAI-format providers are available (use this SDK or the native endpoint for Anthropic models). Intelligent routing applies only to the native endpoint used by this SDK.
 
 ## Tool use
 

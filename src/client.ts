@@ -43,8 +43,11 @@ export class Rouva {
     const url = `${this.baseURL}/api/gateway/messages`
 
     // `stream` is a client-side toggle (return the raw stream vs a buffered
-    // completion) — the gateway always responds with SSE and rejects
-    // `stream: false`, so it must never reach the wire.
+    // completion) and never reaches the wire: the SDK always requests SSE
+    // and normalizes it, keeping a single parsing path for both modes and
+    // every provider dialect. (The gateway itself now supports stream: false
+    // — used by OpenAI-compatible clients on /v1 — but the SDK's buffered
+    // mode still consumes the stream.)
     const { stream: _stream, ...body } = params
 
     const res = await fetch(url, {
