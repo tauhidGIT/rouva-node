@@ -86,13 +86,14 @@ Streaming responses are normalized to OpenAI-style SSE chunks, even when Rouva r
 
 ```typescript
 const res = await rouva.chat.completions.create({
+  model: 'gpt-4o-mini',                    // required when using seed (OpenAI only)
   messages: [{ role: 'user', content: 'Write a haiku about routing.' }],
   system: 'You are a concise assistant.',  // string or Anthropic-style text blocks
   max_tokens: 1024,                        // default 4096
   temperature: 0.7,                        // 0–1
   top_p: 0.9,                              // nucleus sampling, (0, 1]
   stop: ['END'],                           // up to 4 stop sequences
-  seed: 42,                                // OpenAI models only — pins the model
+  seed: 42,                                // pins the request to this exact model
 })
 ```
 
