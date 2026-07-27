@@ -111,11 +111,15 @@ Model IDs beyond the typed union also work when pinned — dated snapshots (`gpt
 
 ## OpenAI-compatible endpoint
 
-Using the OpenAI SDK (or LangChain, the Vercel AI SDK, …) instead of this one? The gateway is also served at `POST /v1/chat/completions` — point `baseURL` at `https://app.rouva.io/v1` with your `rva_` key and it behaves exactly like OpenAI: `model` is required and always honored (no substitution), responses are buffered JSON unless `stream: true`, and only OpenAI-format providers are available (use this SDK or the native endpoint for Anthropic models). Intelligent routing applies only to the native endpoint used by this SDK.
+Using the OpenAI SDK (or LangChain, the Vercel AI SDK, …) instead of this one? The gateway is also served at `POST /v1/chat/completions` — point `baseURL` at `https://app.rouva.io/v1` with your `rva_` key and it behaves exactly like OpenAI: `model` is required, responses are buffered JSON unless `stream: true`, and only OpenAI-format providers are available (use this SDK or the native endpoint for Anthropic models).
+
+Non-tools requests on `/v1` always honor the named model exactly. **Tools requests on `/v1` benefit from within-provider intelligent routing** when Intelligent Routing is enabled in your dashboard — Rouva picks the cheapest capable model within the same provider, using the named `model` as a cost ceiling. The provider never changes (tool schemas are provider-specific), and `response.model` reflects the model that actually served the request. Turn Intelligent Routing off in dashboard Settings → Gateway to always pin the exact model.
 
 ## Tool use
 
-Tools are forwarded to your target provider verbatim — define them in the **provider's own format** (OpenAI `{ type: "function", function: {...} }` or Anthropic `{ name, description, input_schema }`) and pin the matching `model`. Tools requests are never re-routed: tool schemas are provider-specific, so `model` is required and the gateway returns a 400 without it.
+Tools are forwarded to your target provider verbatim — define them in the **provider's own format** (OpenAI `{ type: "function", function: {...} }` or Anthropic `{ name, description, input_schema }`) and pin the matching `model`. Tool schemas are provider-specific, so `model` is required and the gateway returns a 400 without it.
+
+When using the `/v1` endpoint (OpenAI SDK, LangChain, Vercel AI SDK, …) with Intelligent Routing enabled, tools requests are routed to the cheapest capable model within the same provider — see [OpenAI-compatible endpoint](#openai-compatible-endpoint) for details. On the native SDK endpoint (`/api/gateway/messages`), the named model is always honored exactly.
 
 ```typescript
 const res = await rouva.chat.completions.create({
@@ -157,7 +161,7 @@ Responses are normalized to the OpenAI shape regardless of provider: Anthropic `
 
 **Don't branch on `finish_reason` to detect tool calls** — check for the presence of `message.tool_calls` instead. `finish_reason` follows each provider's own semantics, and OpenAI notably returns `"stop"` (not `"tool_calls"`) when `tool_choice` forces a specific function. The SDK passes OpenAI's values through unchanged so behavior matches calling OpenAI directly.
 
-Tools requests record usage and cost but no savings, and are not quality-scored or served from the semantic cache.
+Tools requests record usage and cost. Savings are recorded when within-provider routing substitutes a cheaper model on `/v1`. Tools responses are not quality-scored or served from the semantic cache.
 
 ## Options
 
