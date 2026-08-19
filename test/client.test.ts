@@ -413,4 +413,71 @@ describe('sampling params', () => {
     expect(body.stop).toEqual(['END'])
     expect(body.seed).toBe(42)
   })
+
+  describe('session management', () => {
+    it('startSession() returns a session ID string', () => {
+      const rouva = new Rouva({ apiKey: 'rva_test_key' })
+      const id = rouva.startSession()
+      expect(typeof id).toBe('string')
+      expect(id.length).toBeGreaterThan(0)
+    })
+
+    it('sessionId getter returns undefined before startSession()', () => {
+      const rouva = new Rouva({ apiKey: 'rva_test_key' })
+      expect(rouva.sessionId).toBeUndefined()
+    })
+
+    it('sessionId getter returns the active session ID after startSession()', () => {
+      const rouva = new Rouva({ apiKey: 'rva_test_key' })
+      const id = rouva.startSession()
+      expect(rouva.sessionId).toBe(id)
+    })
+
+    it('endSession() clears the session ID', () => {
+      const rouva = new Rouva({ apiKey: 'rva_test_key' })
+      rouva.startSession()
+      rouva.endSession()
+      expect(rouva.sessionId).toBeUndefined()
+    })
+
+    it('sends x-rouva-session-id header when a session is active', async () => {
+      fetchMock.mockResolvedValue(new Response(streamFrom('data: [DONE]\n\n'), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }))
+      const rouva = new Rouva({ apiKey: 'rva_test_key' })
+      const id = rouva.startSession()
+      await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] })
+      expect(fetchMock.mock.calls[0][1].headers['x-rouva-session-id']).toBe(id)
+    })
+
+    it('does not send x-rouva-session-id header when no session is active', async () => {
+      fetchMock.mockResolvedValue(new Response(streamFrom('data: [DONE]\n\n'), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }))
+      const rouva = new Rouva({ apiKey: 'rva_test_key' })
+      await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] })
+      expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('x-rouva-session-id')
+    })
+
+    it('does not send x-rouva-session-id after endSession()', async () => {
+      fetchMock.mockResolvedValue(new Response(streamFrom('data: [DONE]\n\n'), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }))
+      const rouva = new Rouva({ apiKey: 'rva_test_key' })
+      rouva.startSession()
+      rouva.endSession()
+      await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] })
+      expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('x-rouva-session-id')
+    })
+
+    it('each startSession() call generates a unique ID', () => {
+      const rouva = new Rouva({ apiKey: 'rva_test_key' })
+      const id1 = rouva.startSession()
+      const id2 = rouva.startSession()
+      expect(id1).not.toBe(id2)
+    })
+  })
 })

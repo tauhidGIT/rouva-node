@@ -89,6 +89,7 @@ export type RouvaModel =
   // OpenAI — GPT-5 family
   | 'gpt-5-nano'
   | 'gpt-5-mini'
+  | 'gpt-5.4-mini'
   | 'gpt-5'
   | 'gpt-5.6'
   // OpenAI — GPT-4.1 family
@@ -99,6 +100,8 @@ export type RouvaModel =
   | 'gpt-4o'
   | 'gpt-4o-mini'
   // Gemini
+  | 'gemini-3.7-flash'
+  | 'gemini-3.6-flash'
   | 'gemini-2.5-flash'
   | 'gemini-2.5-pro'
   // DeepSeek
@@ -110,10 +113,12 @@ export type RouvaModel =
   | 'mistral-large-latest'
   // Moonshot
   | 'kimi-k2.6'
+  | 'kimi-k3'
   // xAI
+  | 'grok-4.6'
+  | 'grok-4.5'
   | 'grok-4.3'
   | 'grok-4.20-0309-reasoning'
-  | 'grok-4.5'
   // Z.ai
   | 'glm-4.7-flash'
   | 'glm-5.2'

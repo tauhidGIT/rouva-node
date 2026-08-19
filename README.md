@@ -107,7 +107,13 @@ Unsupported OpenAI options (`response_format`, `logit_bias`, `n > 1`, the legacy
 
 ## Unlisted models
 
-Model IDs beyond the typed union also work when pinned — dated snapshots (`gpt-4o-mini-2024-07-18`), fine-tunes (`ft:gpt-4o-mini:…`), and newly released models are matched to their provider by naming convention and forwarded as-is. Until the gateway's pricing registry knows them, the dashboard records their token counts with zero cost.
+Dated snapshots (`gpt-4o-mini-2024-07-18`) and fine-tunes (`ft:gpt-4o-mini:…`) work when pinned — they are matched to their provider by naming convention and forwarded as-is. Until the gateway's pricing registry knows them, the dashboard records their token counts with zero cost.
+
+Models not recognised by the gateway return a `400` immediately:
+
+```json
+{ "error": "Model \"<id>\" is not supported. See rouva.io/docs for the supported model list." }
+```
 
 ## OpenAI-compatible endpoint
 
@@ -163,6 +169,18 @@ Responses are normalized to the OpenAI shape regardless of provider: Anthropic `
 
 Tools requests record usage and cost. Savings are recorded when within-provider routing substitutes a cheaper model on `/v1`. Tools responses are not quality-scored or served from the semantic cache.
 
+## Cost optimisations
+
+Rouva applies several cost-saving layers automatically on every non-tools request — no configuration required.
+
+**Semantic cache (A)** — repeated or semantically similar prompts are served from cache without hitting the upstream provider. Cache hits record zero cost and appear in your dashboard with a `semantic_cache_hit` flag.
+
+**Prompt caching (B)** — Anthropic requests automatically include cache-control headers on large system prompts and conversation prefixes, reducing input token costs on repeated turns.
+
+**Conversation summarisation (C2)** — long Anthropic conversations are summarised by a cheap model before forwarding, compressing the context window and reducing input tokens. The summarisation cost is included in the request's spend snapshot. Only runs when the conversation exceeds ~2,000 tokens of non-system content and the request is not a tools request.
+
+All three are skipped for tools requests, which are forwarded verbatim.
+
 ## Options
 
 ```typescript
@@ -171,6 +189,33 @@ const rouva = new Rouva({
   baseURL: 'https://...',   // Optional — override the gateway URL
 })
 ```
+
+## Agent session tracking
+
+Group all turns of an agent run under a single session ID so the Rouva dashboard can show per-session cost, token usage, and quality.
+
+```typescript
+const rouva = new Rouva({ apiKey: 'rva_...' })
+
+// Start a session — auto-generates an ID and attaches it to every request
+const sessionId = rouva.startSession()
+
+// All turns carry the same session ID automatically
+await rouva.chat.completions.create({ messages: [...], tools: [...] })
+await rouva.chat.completions.create({ messages: [...], tools: [...] })
+await rouva.chat.completions.create({ messages: [...], tools: [...] })
+
+// End the session when the agent run is complete
+rouva.endSession()
+```
+
+You can also read the active session ID at any time:
+
+```typescript
+console.log(rouva.sessionId) // 'rva-sess-abc123' or undefined
+```
+
+Sessions are optional — requests without an active session are tracked individually as before.
 
 ## Response metadata
 
