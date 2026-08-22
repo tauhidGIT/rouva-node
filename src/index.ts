@@ -15,4 +15,7 @@ export type {
   ChatCompletionChoice,
   ChatCompletionUsage,
   RouvaResponseMeta,
+  ToolHandler,
+  RunLoopOptions,
+  RunLoopResult,
 } from './types'

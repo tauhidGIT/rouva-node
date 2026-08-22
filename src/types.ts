@@ -238,3 +238,34 @@ export interface RouvaResponseMeta {
   /** Semantic cache status when exposed by the gateway */
   cache?: string
 }
+
+/** Handler function for a registered tool */
+export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown> | unknown
+
+export interface RunLoopOptions {
+  /** Conversation messages to start the loop with */
+  messages: ChatMessage[]
+  /** Tool definitions forwarded to the model verbatim */
+  tools: Array<Record<string, unknown>>
+  /** Model to use — required (tool schemas are provider-specific) */
+  model: RouvaModel
+  /** Provider hint, forwarded verbatim when set */
+  provider?: RouvaProvider
+  /** Maximum number of model turns before aborting (default: 10) */
+  maxTurns?: number
+  /** Max tokens per turn */
+  max_tokens?: number
+  /** Sampling temperature */
+  temperature?: number
+}
+
+export interface RunLoopResult {
+  /** Final text content returned by the model after all tool calls are resolved */
+  content: string
+  /** Number of model turns that ran (including the final text turn) */
+  turns: number
+  /** Total tool calls dispatched across all turns */
+  toolCallsMade: number
+  /** Session ID auto-generated for this loop run */
+  sessionId: string
+}

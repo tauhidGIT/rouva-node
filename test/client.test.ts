@@ -481,3 +481,335 @@ describe('sampling params', () => {
     })
   })
 })
+
+// ── Helpers for runLoop tests ─────────────────────────────────────────────────
+// These emit proper SSE streaming delta format — readChatCompletionFromSse
+// parses `delta` fields, not `message` fields.
+
+function sseStream(...chunks: object[]): Response {
+  const lines = chunks.map(c => `data: ${JSON.stringify(c)}\n\n`).join('') + 'data: [DONE]\n\n'
+  return new Response(streamFrom(lines), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  })
+}
+
+function toolCallCompletion(toolCalls: { id: string; name: string; arguments: string }[]): Response {
+  // Emit: role delta, then one chunk per tool call (name+id), then finish_reason chunk
+  return sseStream(
+    {
+      id: 'chatcmpl-tools',
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: 'gpt-4o',
+      choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
+    },
+    ...toolCalls.map((tc, i) => ({
+      id: 'chatcmpl-tools',
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: 'gpt-4o',
+      choices: [{
+        index: 0,
+        delta: {
+          tool_calls: [{ index: i, id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.arguments } }],
+        },
+        finish_reason: null,
+      }],
+    })),
+    {
+      id: 'chatcmpl-tools',
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: 'gpt-4o',
+      choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+      usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 },
+    },
+  )
+}
+
+function textCompletion(content: string): Response {
+  return sseStream(
+    {
+      id: 'chatcmpl-final',
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: 'gpt-4o',
+      choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }],
+    },
+    {
+      id: 'chatcmpl-final',
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: 'gpt-4o',
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 30, completion_tokens: 15, total_tokens: 45 },
+    },
+  )
+}
+
+const TOOLS = [{ type: 'function', function: { name: 'get_weather', description: 'Get weather', parameters: {} } }]
+
+beforeEach(() => { fetchMock.mockReset() })
+
+// ── registerTool ──────────────────────────────────────────────────────────────
+
+describe('registerTool', () => {
+  it('registers a handler that runLoop can call', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const handler = vi.fn().mockResolvedValue({ temp: 72 })
+    rouva.registerTool('get_weather', handler)
+
+    fetchMock
+      .mockResolvedValueOnce(toolCallCompletion([{ id: 'call_1', name: 'get_weather', arguments: '{"city":"Paris"}' }]))
+      .mockResolvedValueOnce(textCompletion('It is 72 degrees.'))
+
+    await rouva.runLoop({
+      messages: [{ role: 'user', content: 'What is the weather in Paris?' }],
+      tools: TOOLS,
+      model: 'gpt-4o',
+    })
+
+    expect(handler).toHaveBeenCalledOnce()
+    expect(handler).toHaveBeenCalledWith({ city: 'Paris' })
+  })
+
+  it('overwrites a previously registered handler with the same name', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const first = vi.fn().mockResolvedValue('first')
+    const second = vi.fn().mockResolvedValue('second')
+    rouva.registerTool('fn', first)
+    rouva.registerTool('fn', second)
+
+    fetchMock
+      .mockResolvedValueOnce(toolCallCompletion([{ id: 'call_1', name: 'fn', arguments: '{}' }]))
+      .mockResolvedValueOnce(textCompletion('done'))
+
+    await rouva.runLoop({ messages: [{ role: 'user', content: 'go' }], tools: TOOLS, model: 'gpt-4o' })
+    expect(first).not.toHaveBeenCalled()
+    expect(second).toHaveBeenCalledOnce()
+  })
+})
+
+// ── runLoop — basic flow ──────────────────────────────────────────────────────
+
+describe('runLoop — basic flow', () => {
+  it('returns final content when model stops immediately (no tool calls)', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    fetchMock.mockResolvedValueOnce(textCompletion('Hello!'))
+
+    const result = await rouva.runLoop({
+      messages: [{ role: 'user', content: 'Say hello' }],
+      tools: TOOLS,
+      model: 'gpt-4o',
+    })
+
+    expect(result.content).toBe('Hello!')
+    expect(result.turns).toBe(1)
+    expect(result.toolCallsMade).toBe(0)
+  })
+
+  it('completes a single-tool single-turn loop', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    rouva.registerTool('get_weather', async () => ({ temp: 72 }))
+
+    fetchMock
+      .mockResolvedValueOnce(toolCallCompletion([{ id: 'call_1', name: 'get_weather', arguments: '{"city":"Paris"}' }]))
+      .mockResolvedValueOnce(textCompletion('72 degrees in Paris.'))
+
+    const result = await rouva.runLoop({
+      messages: [{ role: 'user', content: 'Weather in Paris?' }],
+      tools: TOOLS,
+      model: 'gpt-4o',
+    })
+
+    expect(result.content).toBe('72 degrees in Paris.')
+    expect(result.turns).toBe(2)
+    expect(result.toolCallsMade).toBe(1)
+  })
+
+  it('returns a sessionId', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    fetchMock.mockResolvedValueOnce(textCompletion('Done'))
+
+    const result = await rouva.runLoop({
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: TOOLS,
+      model: 'gpt-4o',
+    })
+
+    expect(result.sessionId).toMatch(/^rva-sess-/)
+  })
+
+  it('clears the session after loop completes', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    fetchMock.mockResolvedValueOnce(textCompletion('Done'))
+
+    await rouva.runLoop({ messages: [{ role: 'user', content: 'hi' }], tools: TOOLS, model: 'gpt-4o' })
+
+    expect(rouva.sessionId).toBeUndefined()
+  })
+
+  it('clears the session even when an error is thrown', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    rouva.registerTool('get_weather', async () => { throw new Error('tool failed') })
+
+    fetchMock.mockResolvedValueOnce(
+      toolCallCompletion([{ id: 'call_1', name: 'get_weather', arguments: '{}' }])
+    )
+
+    await expect(rouva.runLoop({ messages: [{ role: 'user', content: 'go' }], tools: TOOLS, model: 'gpt-4o' })).rejects.toThrow('tool failed')
+    expect(rouva.sessionId).toBeUndefined()
+  })
+})
+
+// ── runLoop — parallel dispatch ───────────────────────────────────────────────
+
+describe('runLoop — parallel dispatch', () => {
+  it('dispatches two tool calls in parallel and sends both results in one turn', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const order: string[] = []
+
+    rouva.registerTool('get_weather', async (args) => {
+      order.push(`weather:${(args as { city: string }).city}`)
+      return { temp: 20 }
+    })
+    rouva.registerTool('search_web', async (args) => {
+      order.push(`search:${(args as { query: string }).query}`)
+      return { results: [] }
+    })
+
+    fetchMock
+      .mockResolvedValueOnce(toolCallCompletion([
+        { id: 'call_1', name: 'get_weather', arguments: '{"city":"Paris"}' },
+        { id: 'call_2', name: 'search_web', arguments: '{"query":"Eiffel Tower"}' },
+      ]))
+      .mockResolvedValueOnce(textCompletion('Here is the info.'))
+
+    const result = await rouva.runLoop({
+      messages: [{ role: 'user', content: 'Weather and web search' }],
+      tools: TOOLS,
+      model: 'gpt-4o',
+    })
+
+    expect(result.toolCallsMade).toBe(2)
+    expect(result.turns).toBe(2)
+    // Both handlers called
+    expect(order).toHaveLength(2)
+    expect(order).toContain('weather:Paris')
+    expect(order).toContain('search:Eiffel Tower')
+  })
+
+  it('sends tool results as separate tool messages with correct tool_call_ids', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    rouva.registerTool('fn_a', async () => 'result_a')
+    rouva.registerTool('fn_b', async () => 'result_b')
+
+    // Both tool calls in a single delta chunk so the SSE parser sees them together
+    fetchMock
+      .mockResolvedValueOnce(sseStream(
+        { id: 'c', object: 'chat.completion.chunk', created: 1, model: 'gpt-4o', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] },
+        { id: 'c', object: 'chat.completion.chunk', created: 1, model: 'gpt-4o', choices: [{ index: 0, delta: { tool_calls: [
+          { index: 0, id: 'call_a', type: 'function', function: { name: 'fn_a', arguments: '{}' } },
+          { index: 1, id: 'call_b', type: 'function', function: { name: 'fn_b', arguments: '{}' } },
+        ] }, finish_reason: null }] },
+        { id: 'c', object: 'chat.completion.chunk', created: 1, model: 'gpt-4o', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 } },
+      ))
+      .mockResolvedValueOnce(textCompletion('done'))
+
+    await rouva.runLoop({
+      messages: [{ role: 'user', content: 'go' }],
+      tools: TOOLS,
+      model: 'gpt-4o',
+    })
+
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body)
+    const toolMessages = secondBody.messages.filter((m: { role: string }) => m.role === 'tool')
+    expect(toolMessages).toHaveLength(2)
+    expect(toolMessages.find((m: { tool_call_id: string }) => m.tool_call_id === 'call_a').content).toBe('result_a')
+    expect(toolMessages.find((m: { tool_call_id: string }) => m.tool_call_id === 'call_b').content).toBe('result_b')
+  })
+
+  it('JSON-serializes non-string tool results', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    rouva.registerTool('get_data', async () => ({ value: 42, items: [1, 2, 3] }))
+
+    fetchMock
+      .mockResolvedValueOnce(sseStream(
+        { id: 'c', object: 'chat.completion.chunk', created: 1, model: 'gpt-4o', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] },
+        { id: 'c', object: 'chat.completion.chunk', created: 1, model: 'gpt-4o', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'get_data', arguments: '{}' } }] }, finish_reason: null }] },
+        { id: 'c', object: 'chat.completion.chunk', created: 1, model: 'gpt-4o', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } },
+      ))
+      .mockResolvedValueOnce(textCompletion('done'))
+
+    await rouva.runLoop({ messages: [{ role: 'user', content: 'go' }], tools: TOOLS, model: 'gpt-4o' })
+
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body)
+    const toolMsg = secondBody.messages.find((m: { role: string }) => m.role === 'tool')
+    expect(JSON.parse(toolMsg.content)).toEqual({ value: 42, items: [1, 2, 3] })
+  })
+
+  it('accumulates toolCallsMade across multiple turns', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    rouva.registerTool('step', async () => 'ok')
+
+    fetchMock
+      .mockResolvedValueOnce(toolCallCompletion([{ id: 'c1', name: 'step', arguments: '{}' }]))
+      .mockResolvedValueOnce(toolCallCompletion([{ id: 'c2', name: 'step', arguments: '{}' }, { id: 'c3', name: 'step', arguments: '{}' }]))
+      .mockResolvedValueOnce(textCompletion('done'))
+
+    const result = await rouva.runLoop({ messages: [{ role: 'user', content: 'go' }], tools: TOOLS, model: 'gpt-4o' })
+
+    expect(result.toolCallsMade).toBe(3)
+    expect(result.turns).toBe(3)
+  })
+})
+
+// ── runLoop — error handling ──────────────────────────────────────────────────
+
+describe('runLoop — error handling', () => {
+  it('throws when no handler is registered for a tool', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+
+    fetchMock.mockResolvedValueOnce(
+      toolCallCompletion([{ id: 'call_1', name: 'unknown_tool', arguments: '{}' }])
+    )
+
+    await expect(rouva.runLoop({
+      messages: [{ role: 'user', content: 'go' }],
+      tools: TOOLS,
+      model: 'gpt-4o',
+    })).rejects.toThrow('no handler registered for tool "unknown_tool"')
+  })
+
+  it('throws when maxTurns is exceeded', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    rouva.registerTool('loop_forever', async () => 'ok')
+
+    // Each call must return a fresh Response — a consumed ReadableStream can't be re-read
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(toolCallCompletion([{ id: 'call_1', name: 'loop_forever', arguments: '{}' }]))
+    )
+
+    await expect(rouva.runLoop({
+      messages: [{ role: 'user', content: 'go' }],
+      tools: TOOLS,
+      model: 'gpt-4o',
+      maxTurns: 3,
+    })).rejects.toThrow('reached maxTurns (3)')
+  })
+
+  it('handles malformed tool arguments gracefully (defaults to empty object)', async () => {
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const handler = vi.fn().mockResolvedValue('ok')
+    rouva.registerTool('get_weather', handler)
+
+    fetchMock
+      .mockResolvedValueOnce(toolCallCompletion([{ id: 'call_1', name: 'get_weather', arguments: 'not-json' }]))
+      .mockResolvedValueOnce(textCompletion('done'))
+
+    await rouva.runLoop({ messages: [{ role: 'user', content: 'go' }], tools: TOOLS, model: 'gpt-4o' })
+
+    expect(handler).toHaveBeenCalledWith({})
+  })
+})
