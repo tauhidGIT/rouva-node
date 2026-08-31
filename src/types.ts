@@ -279,12 +279,9 @@ export interface RunParams {
    */
   tool_handlers: Record<string, string>
   /**
-   * Target model for the first turn. When Intelligent Routing is enabled the
-   * gateway may switch providers across turns — conversation history (including
-   * tool calls and results) is automatically translated between OpenAI and
-   * Anthropic wire formats by the canonical harness, so no client-side
-   * conversion is needed. Omit to let Rouva select the cheapest capable model
-   * automatically.
+   * Target model. Intelligent Routing may select a cheaper model within the
+   * same provider; the session stays on one provider for its entire lifetime.
+   * Omit to let Rouva select the cheapest capable model automatically.
    */
   model?: RouvaModel
   /**
