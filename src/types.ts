@@ -65,6 +65,7 @@ export type RouvaProvider =
   | 'moonshot'
   | 'xai'
   | 'zai'
+  | 'alibaba'
   | (string & {})
 
 /**
@@ -122,6 +123,13 @@ export type RouvaModel =
   // Z.ai
   | 'glm-4.7-flash'
   | 'glm-5.2'
+  // Alibaba Qwen
+  | 'qwen-turbo'
+  | 'qwen-plus'
+  | 'qwen-max'
+  | 'qwen3-30b-a3b'
+  | 'qwen3-32b'
+  | 'qwen3-235b-a22b'
   // Allow any string for forward compatibility
   | (string & {})
 
@@ -237,4 +245,90 @@ export interface RouvaResponseMeta {
   task_type?: string
   /** Semantic cache status when exposed by the gateway */
   cache?: string
+}
+
+export interface RunParams {
+  /**
+   * Conversation history to seed the agent loop with.
+   * Typically a single user message, but may include prior turns for
+   * multi-shot agents.
+   */
+  messages: ChatMessage[]
+  /**
+   * Tool definitions to expose to the model. Accepts both OpenAI-style
+   * `{ type: "function", function: { name, description, parameters } }` and
+   * Anthropic-style `{ name, description, input_schema }` objects.
+   * At least one tool is required.
+   *
+   * The gateway's canonical translation layer normalizes tool schemas to the
+   * correct wire format for the target provider on every turn — you do not
+   * need to convert between formats when the router switches providers
+   * mid-session. Same-provider turns replay schemas verbatim, preserving
+   * vendor-specific fields like `strict` (OpenAI) or `cache_control`
+   * (Anthropic) exactly as supplied.
+   */
+  tools: Array<Record<string, unknown>>
+  /**
+   * Map of tool name → handler URL. When the model calls a tool, the gateway
+   * POSTs the tool input as JSON to the corresponding URL and feeds the
+   * response body back as the tool result. All handlers must be public HTTPS
+   * endpoints.
+   *
+   * @example
+   * { search: 'https://api.example.com/search', calculator: 'https://api.example.com/calc' }
+   */
+  tool_handlers: Record<string, string>
+  /**
+   * Target model for the first turn. When Intelligent Routing is enabled the
+   * gateway may switch providers across turns — conversation history (including
+   * tool calls and results) is automatically translated between OpenAI and
+   * Anthropic wire formats by the canonical harness, so no client-side
+   * conversion is needed. Omit to let Rouva select the cheapest capable model
+   * automatically.
+   */
+  model?: RouvaModel
+  /**
+   * Force a specific provider when paired with `model`.
+   */
+  provider?: RouvaProvider
+  /**
+   * Maximum number of agentic turns before the loop exits.
+   * Defaults to 10. Each turn = one model call (plus parallel tool dispatch).
+   */
+  max_turns?: number
+  /**
+   * Maximum tokens the model may generate per turn.
+   * Defaults to 4096.
+   */
+  max_tokens?: number
+  /**
+   * Sampling temperature 0–1.
+   */
+  temperature?: number
+  /**
+   * Hard cap on total session spend in USD. The loop exits cleanly when the
+   * cumulative cost of all turns reaches this threshold.
+   */
+  session_budget_usd?: number
+}
+
+export interface RunResult {
+  /** Final model response text after all tool loops complete. */
+  content: string | null
+  /** Number of agentic turns executed. */
+  turns: number
+  /** Total number of tool calls dispatched across all turns. */
+  tool_calls_made: number
+  /** Session ID — all turns are grouped under this ID in the Rouva dashboard. */
+  session_id: string
+  /**
+   * Why the loop exited: `"stop"` (model finished), `"max_turns"` (turn limit
+   * reached), `"budget_exceeded"` (session_budget_usd hit), or a provider
+   * finish reason such as `"end_turn"` or `"length"`.
+   */
+  finish_reason: string | null
+  /** USD cost of the final turn. */
+  cost_usd: number
+  /** Cumulative USD cost of all turns in the session. */
+  session_cost_usd: number
 }
