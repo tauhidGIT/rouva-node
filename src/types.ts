@@ -261,11 +261,10 @@ export interface RunParams {
    * At least one tool is required.
    *
    * The gateway's canonical translation layer normalizes tool schemas to the
-   * correct wire format for the target provider on every turn — you do not
-   * need to convert between formats when the router switches providers
-   * mid-session. Same-provider turns replay schemas verbatim, preserving
-   * vendor-specific fields like `strict` (OpenAI) or `cache_control`
-   * (Anthropic) exactly as supplied.
+   * correct wire format for the selected provider on every turn — you do not
+   * need to convert between formats. Same-provider turns replay schemas
+   * verbatim, preserving vendor-specific fields like `strict` (OpenAI) or
+   * `cache_control` (Anthropic) exactly as supplied.
    */
   tools: Array<Record<string, unknown>>
   /**
@@ -279,9 +278,12 @@ export interface RunParams {
    */
   tool_handlers: Record<string, string>
   /**
-   * Target model. Intelligent Routing may select a cheaper model within the
-   * same provider; the session stays on one provider for its entire lifetime.
-   * Omit to let Rouva select the cheapest capable model automatically.
+   * Target model. Intelligent Routing selects a provider and model once before
+   * the loop begins — the session stays on that provider for all turns. When
+   * the session history is fully translatable, routing may cross the
+   * Anthropic ↔ OpenAI-compatible boundary; the canonical layer handles tool
+   * schema translation automatically. Omit to let Rouva select the cheapest
+   * capable model automatically.
    */
   model?: RouvaModel
   /**
