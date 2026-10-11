@@ -39,6 +39,11 @@ export class RouvaError extends Error {
 }
 
 export async function toRouvaError(kind: 'Gateway' | 'Run', res: Response): Promise<RouvaError> {
-  const raw = await res.text().catch(() => res.statusText)
+  const raw = await res.text().catch((err: unknown) => {
+    // A cancellation while reading the error body is the caller's abort, not a
+    // gateway error — rethrow it so it isn't mistaken for a refusal and retried.
+    if ((err as { name?: unknown } | null)?.name === 'AbortError') throw err
+    return res.statusText
+  })
   return new RouvaError(kind, res.status, res.headers, raw)
 }

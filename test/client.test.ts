@@ -661,3 +661,29 @@ describe('0.3.0 — a body that fails mid-response is an error, never a truncate
     await expect(readStream(stream)).rejects.toThrow(/aborted/)
   })
 })
+
+describe('0.3.0 — an abort while reading an error body stays an abort (Codex P2)', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  it('rejects with the AbortError, not a RouvaError', async () => {
+    const { RouvaError } = await import('../src')
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) { controller.error(new DOMException('The operation was aborted.', 'AbortError')) },
+    })
+    fetchMock.mockResolvedValue(new Response(body, { status: 429, headers: { 'Retry-After': '60' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e)
+    expect(err).not.toBeInstanceOf(RouvaError)
+    expect(err.name).toBe('AbortError')
+  })
+
+  it('other body-read failures still fall back to a RouvaError with the status text', async () => {
+    const { RouvaError } = await import('../src')
+    const body = new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new TypeError('network reset')) } })
+    fetchMock.mockResolvedValue(new Response(body, { status: 502, statusText: 'Bad Gateway' }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err.status).toBe(502)
+  })
+})
