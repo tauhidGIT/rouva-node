@@ -286,8 +286,12 @@ export function normalizeGatewayStream(
             }
           }
         }
-      } finally {
         controller.close()
+      } catch (err) {
+        // A failed body read (an aborted request, a dropped connection) must
+        // surface as an error — closing here turned it into a clean EOF, so a
+        // buffered call resolved with a truncated completion.
+        controller.error(err)
       }
     },
   })
@@ -420,17 +424,21 @@ export async function readChatCompletionFromSse(
 }
 
 export function getRouvaMetadata(headers: Headers): RouvaResponseMeta | undefined {
-  const modelUsed = headers.get('x-rouva-model') ?? undefined
-  const providerUsed = headers.get('x-rouva-provider') ?? undefined
-  const taskType = headers.get('x-rouva-task') ?? undefined
-  const cache = headers.get('x-rouva-cache') ?? undefined
+  // An empty header (e.g. X-Rouva-Task on a duplicate-cache hit) means unknown.
+  const read = (name: string) => headers.get(name) || undefined
+  const modelUsed = read('x-rouva-model')
+  const providerUsed = read('x-rouva-provider')
+  const taskType = read('x-rouva-task')
+  // Duplicate-request cache hit (an identical request within 60s, not charged).
+  // (The old x-rouva-cache header went away with the semantic cache.)
+  const dedup = headers.get('x-rouva-dedup') === '1' ? true : undefined
 
-  if (!modelUsed && !providerUsed && !taskType && !cache) return undefined
+  if (!modelUsed && !providerUsed && !taskType && !dedup) return undefined
 
   return {
     model_used: modelUsed,
     provider_used: providerUsed,
     task_type: taskType,
-    cache,
+    ...(dedup ? { dedup } : {}),
   }
 }

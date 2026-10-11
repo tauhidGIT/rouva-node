@@ -1,3 +1,9 @@
+/** Per-call options. */
+export interface RequestOptions {
+  /** Abort the request (e.g. a long `run()` the user navigated away from). */
+  signal?: AbortSignal
+}
+
 export interface RouvaOptions {
   /** Your Rouva gateway API key (rva_...) */
   apiKey: string
@@ -69,67 +75,87 @@ export type RouvaProvider =
   | (string & {})
 
 /**
- * Supported models across all providers.
+ * Supported models across all providers (the gateway's list as of SDK 0.3.0).
  * Omit `model` entirely to let Rouva route to the cheapest capable model automatically.
  *
- * IDs not listed here also work when pinned — dated snapshots
- * (`gpt-4o-mini-2024-07-18`), fine-tunes (`ft:gpt-4o-mini:…`), and new
- * releases are matched to their provider by naming convention and forwarded
- * as-is. Until the gateway's registry knows their pricing, such requests are
- * logged with token counts but zero cost.
+ * Other IDs are accepted by the type for forward compatibility. On
+ * `chat.completions.create()` the gateway only serves models it can price
+ * (its built-in list plus its synced model registry); any other ID returns a
+ * 404. `run()` also accepts IDs whose provider it can infer from the name,
+ * logging them without a cost unless the key is spend-capped or the run has a
+ * `session_budget_usd` (then an unpriced model is refused).
+ *
+ * `'gpt-5.6'` is a deprecated alias the gateway maps to `'gpt-5.6-sol'`.
  */
 export type RouvaModel =
   // Anthropic
-  | 'claude-opus-4-6'
-  | 'claude-opus-4-7'
-  | 'claude-opus-4-8'
-  | 'claude-sonnet-4-6'
-  | 'claude-sonnet-5'
-  | 'claude-haiku-4-5-20251001'
+  | 'claude-fable-5-1'
   | 'claude-fable-5'
+  | 'claude-opus-5-5'
+  | 'claude-opus-5'
+  | 'claude-opus-4-8'
+  | 'claude-opus-4-7'
+  | 'claude-opus-4-6'
+  | 'claude-sonnet-5-5'
+  | 'claude-sonnet-5'
+  | 'claude-sonnet-4-6'
+  | 'claude-haiku-4-5-20251001'
+  // OpenAI — GPT-6 family
+  | 'gpt-6.1-sol'
+  | 'gpt-6-sol'
+  | 'gpt-6-luna'
   // OpenAI — GPT-5 family
-  | 'gpt-5-nano'
-  | 'gpt-5-mini'
-  | 'gpt-5.4-mini'
+  | 'gpt-5.6-sol'
+  | 'gpt-5.6-terra'
+  | 'gpt-5.6-luna'
+  | 'gpt-5.6'   // deprecated alias of gpt-5.6-sol
   | 'gpt-5'
-  | 'gpt-5.6'
+  | 'gpt-5.4-mini'
+  | 'gpt-5-mini'
+  | 'gpt-5-nano'
   // OpenAI — GPT-4.1 family
-  | 'gpt-4.1-nano'
-  | 'gpt-4.1-mini'
   | 'gpt-4.1'
+  | 'gpt-4.1-mini'
+  | 'gpt-4.1-nano'
   // OpenAI — GPT-4o family
   | 'gpt-4o'
   | 'gpt-4o-mini'
   // Gemini
+  | 'gemini-3.8-flash'
   | 'gemini-3.7-flash'
   | 'gemini-3.6-flash'
-  | 'gemini-2.5-flash'
+  | 'gemini-3.5-flash-lite'
   | 'gemini-2.5-pro'
+  | 'gemini-2.5-flash'
   // DeepSeek
+  | 'deepseek-flash-4-1'
+  | 'deepseek-v4-pro'
   | 'deepseek-v4-flash'
   | 'deepseek-v4-flash-think'
-  | 'deepseek-v4-pro'
   // Mistral
-  | 'mistral-small-latest'
   | 'mistral-large-latest'
+  | 'mistral-small-latest'
   // Moonshot
-  | 'kimi-k2.6'
   | 'kimi-k3'
+  | 'kimi-k2.6'
   // xAI
+  | 'grok-4.7'
   | 'grok-4.6'
   | 'grok-4.5'
   | 'grok-4.3'
   | 'grok-4.20-0309-reasoning'
   // Z.ai
-  | 'glm-4.7-flash'
+  | 'glm-5.3'
   | 'glm-5.2'
+  | 'glm-4.7-flash'
   // Alibaba Qwen
-  | 'qwen-turbo'
-  | 'qwen-plus'
+  | 'qwen3.8-omni-flash'
   | 'qwen-max'
-  | 'qwen3-30b-a3b'
-  | 'qwen3-32b'
+  | 'qwen-plus'
+  | 'qwen-turbo'
   | 'qwen3-235b-a22b'
+  | 'qwen3-32b'
+  | 'qwen3-30b-a3b'
   // Allow any string for forward compatibility
   | (string & {})
 
@@ -149,8 +175,13 @@ export interface ChatCompletionParams {
    */
   system?: string | SystemTextBlock[]
   /**
-   * Target model — omit to let Rouva route intelligently to the cheapest capable model.
-   * Supports models from any connected provider (Anthropic, OpenAI).
+   * Target model — omit to let Rouva route intelligently to the cheapest
+   * capable model. With Intelligent Routing on, a named model is a price
+   * ceiling for Rouva's own choices: it may substitute a cheaper capable model,
+   * never a pricier one (retries after a provider error included). Two
+   * exceptions: an account routing override set by the workspace owner applies
+   * as policy, even if pricier; and with `provider` also set, the exact model
+   * is used (no substitution).
    */
   model?: RouvaModel
   /**
@@ -160,23 +191,34 @@ export interface ChatCompletionParams {
   provider?: RouvaProvider
   /** Maximum tokens to generate */
   max_tokens?: number
+  /** OpenAI's newer name for `max_tokens`; the gateway accepts either. */
+  max_completion_tokens?: number
+  /**
+   * Your own labels for the request, stored with its usage record and not
+   * sent to the provider: up to 10 string key-value pairs, keys up to 64
+   * characters, values up to 256 characters, no null bytes.
+   */
+  metadata?: Record<string, string>
   /**
    * Sampling temperature 0–1.
-   * Note: reasoning models (gpt-5 family) only support their default
-   * temperature, so the gateway omits it for those.
+   * The gateway omits it for models that only accept their default: OpenAI
+   * reasoning models (gpt-5 / gpt-6 families) and the Claude models that reject
+   * it (Opus 4.7 and newer, Sonnet 5 and newer, Fable).
    */
   temperature?: number
   /**
-   * Nucleus sampling — greater than 0 and at most 1, forwarded to every
-   * provider. `top_p: 1` (the no-op default) is treated as omitted. OpenAI
-   * reasoning models (gpt-5 family, o-series) don't support it: auto-routing
-   * avoids them when top_p is set, and pinning one returns a 400.
+   * Nucleus sampling — greater than 0 and at most 1. `top_p: 1` (the no-op
+   * default) is treated as omitted. OpenAI reasoning models (gpt-5 / gpt-6
+   * families, o-series) don't support it: routing avoids them when top_p is
+   * set, and pinning one returns a 400. The gateway omits it for the Claude
+   * models that reject it (Opus 4.7 and newer, Sonnet 5 and newer, Fable).
    */
   top_p?: number
   /**
-   * Up to 4 stop sequences — a string or array of non-empty strings,
-   * forwarded to every provider (Anthropic receives them as
-   * `stop_sequences`).
+   * Up to 4 stop sequences — a string or array of non-empty strings
+   * (Anthropic receives them as `stop_sequences`). OpenAI and xAI reasoning
+   * models (e.g. gpt-5, grok-4.5 / 4.6 / 4.7) reject `stop`: routing avoids
+   * them when it is set, and pinning one returns a 400.
    */
   stop?: string | string[]
   /**
@@ -194,9 +236,11 @@ export interface ChatCompletionParams {
   /**
    * Tool definitions in your target provider's own format, forwarded to the
    * provider verbatim (OpenAI `{ type: "function", function: {...} }` or
-   * Anthropic `{ name, description, input_schema }`). Requires `model` —
-   * tool schemas are provider-specific, so tools requests are never
-   * re-routed by the gateway.
+   * Anthropic `{ name, description, input_schema }`). Requires `model`.
+   * Tool schemas are provider-specific, so a tools request only ever moves to
+   * another model of the SAME provider (a routing override, or cheaper-model
+   * routing on /v1). Models that don't support tools on Chat Completions
+   * (gpt-6.1-sol, gpt-5.6-*) return a 400.
    */
   tools?: Array<Record<string, unknown>>
   /**
@@ -243,7 +287,16 @@ export interface RouvaResponseMeta {
   provider_used?: string
   /** Task type classified by Rouva when exposed by the gateway */
   task_type?: string
-  /** Semantic cache status when exposed by the gateway */
+  /**
+   * True when the gateway answered from its duplicate-request cache (an
+   * identical request within the last 60 seconds) instead of calling the
+   * provider — that request wasn't charged. Header: `X-Rouva-Dedup`.
+   */
+  dedup?: boolean
+  /**
+   * @deprecated The semantic cache was removed from the gateway (2026-10-08),
+   * so this is never set. Use `dedup`.
+   */
   cache?: string
 }
 
@@ -269,9 +322,9 @@ export interface RunParams {
   tools: Array<Record<string, unknown>>
   /**
    * Map of tool name → handler URL. When the model calls a tool, the gateway
-   * POSTs the tool input as JSON to the corresponding URL and feeds the
-   * response body back as the tool result. All handlers must be public HTTPS
-   * endpoints.
+   * POSTs `{ "name": <tool name>, "arguments": <the model's input object> }`
+   * as JSON to the corresponding URL and feeds the response body back as the
+   * tool result. All handlers must be public HTTPS endpoints.
    *
    * @example
    * { search: 'https://api.example.com/search', calculator: 'https://api.example.com/calc' }
@@ -282,10 +335,9 @@ export interface RunParams {
    * the loop begins — the session stays on that provider for all turns. When
    * the session history is fully translatable, routing may cross the
    * Anthropic ↔ OpenAI-compatible boundary; the canonical layer handles tool
-   * schema translation automatically. Omit to let Rouva select the cheapest
-   * capable model automatically.
+   * schema translation automatically. Required by /run.
    */
-  model?: RouvaModel
+  model: RouvaModel
   /**
    * Force a specific provider when paired with `model`.
    */
@@ -305,8 +357,9 @@ export interface RunParams {
    */
   temperature?: number
   /**
-   * Hard cap on total session spend in USD. The loop exits cleanly when the
-   * cumulative cost of all turns reaches this threshold.
+   * Hard cap on total session spend in USD. The loop exits cleanly (with
+   * `finish_reason: "session_budget_exceeded"`) when the cumulative cost of
+   * all turns reaches this threshold.
    */
   session_budget_usd?: number
 }
@@ -321,13 +374,25 @@ export interface RunResult {
   /** Session ID — all turns are grouped under this ID in the Rouva dashboard. */
   session_id: string
   /**
-   * Why the loop exited: `"stop"` (model finished), `"max_turns"` (turn limit
-   * reached), `"budget_exceeded"` (session_budget_usd hit), or a provider
-   * finish reason such as `"end_turn"` or `"length"`.
+   * Why the loop exited: `"stop"` (the model finished — reported as "stop" for
+   * every provider), `"max_turns"` (turn limit reached),
+   * `"session_budget_exceeded"` (session_budget_usd hit), or a truncation
+   * reason such as `"length"` / `"max_tokens"` (then `error` explains it).
    */
   finish_reason: string | null
-  /** USD cost of the final turn. */
-  cost_usd: number
   /** Cumulative USD cost of all turns in the session. */
   session_cost_usd: number
+  /**
+   * True when a turn reported no usage, so `session_cost_usd` is a lower
+   * bound rather than the full cost.
+   */
+  session_cost_incomplete?: boolean
+  /** Set when Intelligent Routing chose a different model than requested. */
+  routed_model?: string
+  requested_model?: string
+  /**
+   * Explanation when the run stopped early but still returned 200 — e.g.
+   * output truncated on the last turn (raise `max_tokens`).
+   */
+  error?: string
 }

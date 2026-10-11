@@ -481,3 +481,209 @@ describe('sampling params', () => {
     })
   })
 })
+
+// ── 0.3.0: contract sync with the gateway (2026-10-11) ────────────────────────
+
+describe('0.3.0 — errors carry the refusal details', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  it('a marked refusal (X-Rouva-Refusal, sent by the reservation step) throws RouvaError with status, refusal, retryAfter and the message', async () => {
+    const { RouvaError } = await import('../src')
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'Monthly spend limit of $5.00 reached for this key.' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json', 'X-Rouva-Refusal': 'key_cap', 'Retry-After': '3600' },
+    }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err).toBeInstanceOf(Error)                       // existing catch blocks keep working
+    expect(err.status).toBe(429)
+    expect(err.refusal).toBe('key_cap')
+    expect(err.retryAfter).toBe(3600)
+    expect(err.error).toBe('Monthly spend limit of $5.00 reached for this key.')
+    expect(err.message).toMatch(/^\[Rouva\] Gateway error 429: /)   // same format as before
+  })
+
+  it('an unmarked 429 (early cap check: no X-Rouva-Refusal) still exposes retryAfter and the gateway message', async () => {
+    const { RouvaError } = await import('../src')
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'Monthly workspace spend limit of $50.00 reached.' }), {
+      status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '86400' },
+    }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err.refusal).toBeUndefined()
+    expect(err.retryAfter).toBe(86400)
+    expect(err.error).toMatch(/spend limit/)
+  })
+
+  it('a provider error (no refusal header, plain text) still throws RouvaError with the raw body', async () => {
+    const { RouvaError } = await import('../src')
+    fetchMock.mockResolvedValue(new Response('upstream overloaded', { status: 503 }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err.refusal).toBeUndefined()
+    expect(err.retryAfter).toBeUndefined()
+    expect(err.body).toBe('upstream overloaded')
+  })
+})
+
+describe('0.3.0 — response metadata', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  it('X-Rouva-Dedup: 1 surfaces as _rouva.dedup (the semantic-cache field is gone)', async () => {
+    fetchMock.mockResolvedValue(new Response(streamFrom('data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'), {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream', 'X-Rouva-Dedup': '1', 'X-Rouva-Model': 'gpt-4o-mini', 'x-rouva-cache': 'hit' },
+    }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const res = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }) as { _rouva?: Record<string, unknown> }
+    expect(res._rouva).toEqual({ model_used: 'gpt-4o-mini', provider_used: undefined, task_type: undefined, dedup: true })
+    expect(res._rouva).not.toHaveProperty('cache')
+  })
+})
+
+describe('0.3.0 — new request fields reach the gateway', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  it('forwards max_completion_tokens and metadata', async () => {
+    fetchMock.mockResolvedValue(new Response(streamFrom('data: [DONE]\n\n'), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    await rouva.chat.completions.create({
+      model: 'claude-opus-5-5',
+      messages: [{ role: 'user', content: 'hi' }],
+      max_completion_tokens: 256,
+      metadata: { feature: 'search', team: 'growth' },
+    })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      model: 'claude-opus-5-5', max_completion_tokens: 256, metadata: { feature: 'search', team: 'growth' },
+    })
+  })
+})
+
+describe('0.3.0 — rouva.run()', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  const params = {
+    model: 'claude-haiku-4-5-20251001',
+    messages: [{ role: 'user' as const, content: 'Weather in Paris?' }],
+    tools: [{ name: 'get_weather', description: 'Get weather', input_schema: { type: 'object', properties: {} } }],
+    tool_handlers: { get_weather: 'https://api.example.com/weather' },
+    max_turns: 5,
+  }
+
+  it('POSTs to /api/gateway/run with Bearer auth and returns the run result', async () => {
+    const result = { content: 'Sunny', turns: 2, tool_calls_made: 1, session_id: 'rva-sess-1', finish_reason: 'stop', session_cost_usd: 0.0012 }
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key', baseURL: 'https://app.rouva.io/' })
+    expect(await rouva.run(params)).toEqual(result)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://app.rouva.io/api/gateway/run')
+    expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer rva_test_key')
+    expect(JSON.parse(init.body as string)).toEqual(params)
+  })
+
+  it('a non-2xx run throws RouvaError whose body keeps the partial turns and cost', async () => {
+    const { RouvaError } = await import('../src')
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'Spend accounting failed for this turn', turns: 2, session_id: 'rva-sess-1', session_cost_usd: 0.004 }), {
+      status: 503, headers: { 'Content-Type': 'application/json', 'Retry-After': '10' },
+    }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.run(params).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err.message).toMatch(/^\[Rouva\] Run error 503: /)
+    expect(err.retryAfter).toBe(10)
+    expect(err.body).toMatchObject({ turns: 2, session_cost_usd: 0.004 })
+  })
+})
+
+describe('0.3.0 — review follow-ups', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  it('an empty metadata header (X-Rouva-Task on a duplicate-cache hit) is undefined, not ""', async () => {
+    fetchMock.mockResolvedValue(new Response(streamFrom('data: [DONE]\n\n'), {
+      status: 200, headers: { 'Content-Type': 'text/event-stream', 'X-Rouva-Dedup': '1', 'X-Rouva-Model': 'gpt-4o-mini', 'X-Rouva-Task': '' },
+    }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const res = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }) as { _rouva?: Record<string, unknown> }
+    expect(res._rouva?.task_type).toBeUndefined()
+    expect(res._rouva?.dedup).toBe(true)
+  })
+
+  it('create() and run() pass an AbortSignal through to fetch', async () => {
+    fetchMock.mockResolvedValue(new Response(streamFrom('data: [DONE]\n\n'), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const ac = new AbortController()
+    await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }, { signal: ac.signal })
+    expect(fetchMock.mock.calls[0][1].signal).toBe(ac.signal)
+    fetchMock.mockResolvedValue(new Response('{}', { status: 200 }))
+    await rouva.run({ model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }], tools: [{}], tool_handlers: {} }, { signal: ac.signal })
+    expect(fetchMock.mock.calls[1][1].signal).toBe(ac.signal)
+  })
+
+  it('the session header still rides on chat requests through the shared request path', async () => {
+    fetchMock.mockResolvedValue(new Response(streamFrom('data: [DONE]\n\n'), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const id = rouva.startSession()
+    await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] })
+    expect(fetchMock.mock.calls[0][1].headers['x-rouva-session-id']).toBe(id)
+  })
+})
+
+describe('0.3.0 — a body that fails mid-response is an error, never a truncated success (Codex P1)', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  function failingBody(): ReadableStream<Uint8Array> {
+    let sent = false
+    return new ReadableStream({
+      pull(controller) {
+        if (!sent) {
+          sent = true
+          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n'))
+          return
+        }
+        controller.error(new DOMException('The operation was aborted.', 'AbortError'))
+      },
+    })
+  }
+
+  it('buffered: create() rejects instead of resolving with partial content', async () => {
+    fetchMock.mockResolvedValue(new Response(failingBody(), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    await expect(rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] })).rejects.toThrow(/aborted/)
+  })
+
+  it('streaming: the consumer sees the error, not a normal end', async () => {
+    fetchMock.mockResolvedValue(new Response(failingBody(), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const stream = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }], stream: true }) as ReadableStream<Uint8Array>
+    await expect(readStream(stream)).rejects.toThrow(/aborted/)
+  })
+})
+
+describe('0.3.0 — an abort while reading an error body stays an abort (Codex P2)', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  it('rejects with the AbortError, not a RouvaError', async () => {
+    const { RouvaError } = await import('../src')
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) { controller.error(new DOMException('The operation was aborted.', 'AbortError')) },
+    })
+    fetchMock.mockResolvedValue(new Response(body, { status: 429, headers: { 'Retry-After': '60' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e)
+    expect(err).not.toBeInstanceOf(RouvaError)
+    expect(err.name).toBe('AbortError')
+  })
+
+  it('other body-read failures still fall back to a RouvaError with the status text', async () => {
+    const { RouvaError } = await import('../src')
+    const body = new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new TypeError('network reset')) } })
+    fetchMock.mockResolvedValue(new Response(body, { status: 502, statusText: 'Bad Gateway' }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err.status).toBe(502)
+  })
+})

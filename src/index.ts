@@ -1,4 +1,5 @@
 export { Rouva } from './client'
+export { RouvaError } from './errors'
 export type {
   RouvaOptions,
   Message,
@@ -9,10 +10,14 @@ export type {
   ContentBlockMessage,
   ResponseMessage,
   RouvaProvider,
+  RouvaModel,
   SystemTextBlock,
   ChatCompletionParams,
   ChatCompletion,
   ChatCompletionChoice,
   ChatCompletionUsage,
   RouvaResponseMeta,
+  RunParams,
+  RunResult,
+  RequestOptions,
 } from './types'

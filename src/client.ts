@@ -2,12 +2,16 @@ import type {
   RouvaOptions,
   ChatCompletionParams,
   ChatCompletion,
+  RunParams,
+  RunResult,
+  RequestOptions,
 } from './types'
 import {
   getRouvaMetadata,
   normalizeGatewayStream,
   readChatCompletionFromSse,
 } from './sse'
+import { toRouvaError } from './errors'
 
 const DEFAULT_BASE_URL = 'https://app.rouva.io'
 
@@ -18,7 +22,7 @@ export class Rouva {
 
   readonly chat: {
     completions: {
-      create(params: ChatCompletionParams): Promise<ChatCompletion | ReadableStream>
+      create(params: ChatCompletionParams, options?: RequestOptions): Promise<ChatCompletion | ReadableStream>
     }
   }
 
@@ -33,7 +37,7 @@ export class Rouva {
 
     this.chat = {
       completions: {
-        create: (params: ChatCompletionParams) => this._createChatCompletion(params),
+        create: (params: ChatCompletionParams, options?: RequestOptions) => this._createChatCompletion(params, options),
       },
     }
   }
@@ -62,11 +66,57 @@ export class Rouva {
     return this._sessionId
   }
 
-  private async _createChatCompletion(
-    params: ChatCompletionParams
-  ): Promise<ChatCompletion | ReadableStream> {
-    const url = `${this.baseURL}/api/gateway/messages`
+  /**
+   * Run a server-side agentic loop (`POST /api/gateway/run`). The gateway
+   * calls the model, POSTs each tool call to its handler URL as
+   * `{ name, arguments }` (in parallel), feeds the response bodies back as tool
+   * results, and loops until the model stops or a limit is reached — no
+   * streaming, no client-side loop required. Throws `RouvaError` on a non-2xx
+   * response; once the loop has started, its `body` also carries the partial
+   * `turns`, `session_id` and `session_cost_usd` (errors before the first turn
+   * — validation, no key, allowlist — carry only `error`). Pass
+   * `{ signal }` to cancel; a run can take several minutes.
+   *
+   * Every turn is logged as a usage snapshot grouped by `session_id` in the
+   * Rouva dashboard, giving you a full session replay with per-turn cost,
+   * model, and tool call details.
+   *
+   * @example
+   * const result = await rouva.run({
+   *   model: 'claude-haiku-4-5-20251001',
+   *   messages: [{ role: 'user', content: 'What is the weather in Paris?' }],
+   *   tools: [{ name: 'get_weather', description: '...', input_schema: { ... } }],
+   *   tool_handlers: { get_weather: 'https://api.example.com/weather' },
+   *   max_turns: 5,
+   * })
+   * console.log(result.content)      // final model response
+   * console.log(result.turns)        // how many turns it took
+   * console.log(result.session_id)   // dashboard session ID
+   */
+  async run(params: RunParams, options?: RequestOptions): Promise<RunResult> {
+    const res = await this._post('/api/gateway/run', params, {}, options)
+    if (!res.ok) throw await toRouvaError('Run', res)
+    return res.json() as Promise<RunResult>
+  }
 
+  // One request path for every endpoint: auth, JSON body, optional abort signal.
+  private _post(path: string, body: unknown, extraHeaders: Record<string, string>, options?: RequestOptions): Promise<Response> {
+    return fetch(`${this.baseURL}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`,
+        ...extraHeaders,
+      },
+      body: JSON.stringify(body),
+      ...(options?.signal ? { signal: options.signal } : {}),
+    })
+  }
+
+  private async _createChatCompletion(
+    params: ChatCompletionParams,
+    options?: RequestOptions
+  ): Promise<ChatCompletion | ReadableStream> {
     // `stream` is a client-side toggle (return the raw stream vs a buffered
     // completion) and never reaches the wire: the SDK always requests SSE
     // and normalizes it, keeping a single parsing path for both modes and
@@ -75,22 +125,10 @@ export class Rouva {
     // mode still consumes the stream.)
     const { stream: _stream, ...body } = params
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${this.apiKey}`,
-    }
-    if (this._sessionId) headers['x-rouva-session-id'] = this._sessionId
+    const sessionHeader: Record<string, string> = this._sessionId ? { 'x-rouva-session-id': this._sessionId } : {}
+    const res = await this._post('/api/gateway/messages', body, sessionHeader, options)
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    })
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => res.statusText)
-      throw new Error(`[Rouva] Gateway error ${res.status}: ${body}`)
-    }
+    if (!res.ok) throw await toRouvaError('Gateway', res)
 
     if (!res.body) throw new Error('[Rouva] No response body from gateway')
 
