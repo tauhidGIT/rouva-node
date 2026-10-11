@@ -24,7 +24,7 @@ console.log(response.choices[0].message.content)
 
 ## Provider agnostic
 
-Rouva works with all connected providers — Anthropic, OpenAI, Gemini, DeepSeek, Mistral, Moonshot, xAI, and Z.ai. You can request a specific model, force a specific provider, or omit both and let Rouva route to the cheapest capable model automatically.
+Rouva works with all connected providers — Anthropic, OpenAI, Gemini, DeepSeek, Mistral, Moonshot, xAI, Z.ai and Alibaba Qwen. You can request a specific model, force a specific provider, or omit both and let Rouva route to the cheapest capable model automatically.
 
 ```typescript
 // Request a specific model
@@ -89,30 +89,30 @@ const res = await rouva.chat.completions.create({
   model: 'gpt-4o-mini',                    // required when using seed (OpenAI only)
   messages: [{ role: 'user', content: 'Write a haiku about routing.' }],
   system: 'You are a concise assistant.',  // string or Anthropic-style text blocks
-  max_tokens: 1024,                        // default 4096
+  max_tokens: 1024,                        // default 4096 (or max_completion_tokens)
   temperature: 0.7,                        // 0–1
   top_p: 0.9,                              // nucleus sampling, (0, 1]
   stop: ['END'],                           // up to 4 stop sequences
   seed: 42,                                // pins the request to this exact model
+  metadata: { feature: 'search' },         // your labels, stored with the usage record
 })
 ```
 
-- **`temperature`** — sampling temperature between 0 and 1. Reasoning models (the gpt-5 family) only support their default temperature, so the gateway omits it when routing to one.
-- **`max_tokens`** — values below 1024 also steer auto-routing away from reasoning models, which would otherwise spend the whole budget on hidden reasoning tokens.
-- **`top_p`** — nucleus sampling, forwarded to every provider; `top_p: 1` is treated as omitted. OpenAI reasoning models don't support it: auto-routing avoids them when it's set, and pinning one returns a 400.
-- **`stop`** — a string or up to 4 stop sequences, forwarded to every provider (Anthropic receives them as `stop_sequences`).
+- **`temperature`** — sampling temperature between 0 and 1. The gateway omits it for models that only accept their default: OpenAI reasoning models (gpt-5 / gpt-6 families) and the Claude models that reject it (Opus 4.7 and newer, Sonnet 5 and newer, Fable).
+- **`max_tokens`** / **`max_completion_tokens`** — either name works. Values below 1024 also steer auto-routing away from reasoning models, which would otherwise spend the whole budget on hidden reasoning tokens.
+- **`top_p`** — nucleus sampling; `top_p: 1` is treated as omitted. OpenAI reasoning models don't support it: routing avoids them when it's set, and pinning one returns a 400. The gateway omits it for the Claude models that reject it (as for `temperature`).
+- **`stop`** — a string or up to 4 stop sequences (Anthropic receives them as `stop_sequences`). OpenAI and xAI reasoning models (e.g. gpt-5, grok-4.5 / 4.6 / 4.7) reject it: routing avoids them when it's set, and pinning one returns a 400.
+- **`metadata`** — up to 10 string key-value pairs (keys up to 64 characters) stored with the request's usage record; not sent to the provider.
 - **`seed`** — best-effort deterministic sampling. Only OpenAI honors it, so it requires an OpenAI `model` and pins the request to that exact model (no routing, no fallbacks).
 
 Unsupported OpenAI options (`response_format`, `logit_bias`, `n > 1`, the legacy `functions`/`function_call` fields, …) are rejected by the gateway with an explicit 400 rather than silently ignored.
 
 ## Unlisted models
 
-Dated snapshots (`gpt-4o-mini-2024-07-18`) and fine-tunes (`ft:gpt-4o-mini:…`) work when pinned — they are matched to their provider by naming convention and forwarded as-is. Until the gateway's pricing registry knows them, the dashboard records their token counts with zero cost.
-
-Models not recognised by the gateway return a `400` immediately:
+The gateway serves the models it can price — its built-in list (see `RouvaModel` and rouva.io/docs) plus models added to its synced model registry, such as new snapshots. Any other ID returns a `404` immediately:
 
 ```json
-{ "error": "Model \"<id>\" is not supported. See rouva.io/docs for the supported model list." }
+{ "error": "The model `<id>` does not exist or is not supported. See rouva.io/docs for the supported model list." }
 ```
 
 ## OpenAI-compatible endpoint
@@ -123,9 +123,9 @@ Non-tools requests on `/v1` always honor the named model exactly. **Tools reques
 
 ## Tool use
 
-Tools are forwarded to your target provider verbatim — define them in the **provider's own format** (OpenAI `{ type: "function", function: {...} }` or Anthropic `{ name, description, input_schema }`) and pin the matching `model`. Tool schemas are provider-specific, so `model` is required and the gateway returns a 400 without it.
+Tools are forwarded to your target provider verbatim — define them in the **provider's own format** (OpenAI `{ type: "function", function: {...} }` or Anthropic `{ name, description, input_schema }`) and pin the matching `model`. Tool schemas are provider-specific, so `model` is required and the gateway returns a 400 without it. Models that don't support tools on Chat Completions (`gpt-6.1-sol`, `gpt-5.6-*`) also return a 400.
 
-When using the `/v1` endpoint (OpenAI SDK, LangChain, Vercel AI SDK, …) with Intelligent Routing enabled, tools requests are routed to the cheapest capable model within the same provider — see [OpenAI-compatible endpoint](#openai-compatible-endpoint) for details. On the native SDK endpoint (`/api/gateway/messages`), the named model is always honored exactly.
+A tools request only ever moves to another model of the **same provider**: an account routing override for the task (when it targets the same provider), or — on the `/v1` endpoint with Intelligent Routing enabled — the cheapest capable model within that provider, using the named `model` as a cost ceiling (see [OpenAI-compatible endpoint](#openai-compatible-endpoint)). Otherwise the named model is honored exactly.
 
 ```typescript
 const res = await rouva.chat.completions.create({
@@ -167,19 +167,19 @@ Responses are normalized to the OpenAI shape regardless of provider: Anthropic `
 
 **Don't branch on `finish_reason` to detect tool calls** — check for the presence of `message.tool_calls` instead. `finish_reason` follows each provider's own semantics, and OpenAI notably returns `"stop"` (not `"tool_calls"`) when `tool_choice` forces a specific function. The SDK passes OpenAI's values through unchanged so behavior matches calling OpenAI directly.
 
-Tools requests record usage and cost. Savings are recorded when within-provider routing substitutes a cheaper model on `/v1`. Tools responses are not quality-scored or served from the semantic cache.
+Tools requests record usage and cost. Savings are recorded when within-provider routing substitutes a cheaper model on `/v1`. Tools responses are not quality-scored, and streaming tools requests are never served from the duplicate-request cache.
 
 ## Cost optimisations
 
 Rouva applies several cost-saving layers automatically on every non-tools request — no configuration required.
 
-**Semantic cache (A)** — repeated or semantically similar prompts are served from cache without hitting the upstream provider. Cache hits record zero cost and appear in your dashboard with a `semantic_cache_hit` flag.
+**Duplicate-request cache** — an identical request repeated within 60 seconds (typically a client retry) gets the earlier response instead of a second provider call, and isn't charged. Such responses carry `_rouva.dedup: true`.
 
-**Prompt caching (B)** — Anthropic requests automatically include cache-control headers on large system prompts and conversation prefixes, reducing input token costs on repeated turns.
+**Prompt caching** — Anthropic requests automatically include cache-control markers on large system prompts, tool definitions and conversation prefixes, reducing input token costs on repeated turns.
 
-**Conversation summarisation (C2)** — long Anthropic conversations are summarised by a cheap model before forwarding, compressing the context window and reducing input tokens. The summarisation cost is included in the request's spend snapshot. Only runs when the conversation exceeds ~2,000 tokens of non-system content and the request is not a tools request.
+**Conversation summarisation** — long Anthropic conversations are summarised by a cheap model before forwarding, compressing the context window and reducing input tokens. The summarisation cost is included in the request's spend snapshot. Only runs when the conversation exceeds ~2,000 tokens of non-system content and the request is not a tools request.
 
-All three are skipped for tools requests, which are forwarded verbatim.
+Tools requests are forwarded verbatim: no summarisation or whitespace trimming.
 
 ## Options
 
@@ -190,9 +190,99 @@ const rouva = new Rouva({
 })
 ```
 
+## Agentic runs — `rouva.run()`
+
+`rouva.run()` hands the entire agent loop to the Rouva gateway. You define your tools and handler URLs; Rouva calls the model, dispatches tool calls in parallel to your endpoints, and loops until the model stops or a limit is reached — no client-side loop, no streaming required.
+
+```typescript
+const result = await rouva.run({
+  model: 'claude-haiku-4-5-20251001',
+  messages: [{ role: 'user', content: 'What is the weather in Paris and London?' }],
+  tools: [
+    {
+      name: 'get_weather',
+      description: 'Get current weather for a city',
+      input_schema: {
+        type: 'object',
+        properties: { city: { type: 'string' } },
+        required: ['city'],
+      },
+    },
+  ],
+  tool_handlers: {
+    get_weather: 'https://api.example.com/weather',  // gateway POSTs tool input here
+  },
+  max_turns: 5,
+  session_budget_usd: 0.10,  // optional hard cost cap
+})
+
+console.log(result.content)           // final model response
+console.log(result.turns)             // number of turns taken
+console.log(result.tool_calls_made)   // total tool calls dispatched
+console.log(result.session_id)        // dashboard session ID
+console.log(result.session_cost_usd)  // total USD spent
+```
+
+### How it works
+
+1. The gateway sends your `messages` to the model (non-streaming)
+2. When the model returns tool calls, all handlers are dispatched **in parallel** via POST — the request body is `{ "name": "<tool>", "arguments": { …the model's input… } }`, and the response body is used as the tool result
+3. Results are appended and the loop continues
+4. The loop exits when the model stops (`finish_reason` `"stop"` / `"end_turn"`), `max_turns` is reached (`"max_turns"`), or `session_budget_usd` is reached (`"session_budget_exceeded"`). If the last turn's output is truncated, the run returns with `error` set and the truncation reason (e.g. `"length"`)
+
+Every turn is logged as a usage snapshot in the Rouva dashboard under the shared `session_id`, giving you a full session replay with per-turn cost, model used and tool calls. (Tool-loop turns aren't quality-scored.)
+
+### Handler URL requirements
+
+- Must be a public HTTPS URL (private/local addresses are rejected)
+- The gateway sends a `POST` with `Content-Type: application/json` and the body `{ "name": "<tool>", "arguments": { … } }`
+- The response body (text or JSON) is returned to the model as the tool result
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `messages` | `ChatMessage[]` | ✓ | Conversation seed — usually a single user message |
+| `tools` | `object[]` | ✓ | Tool definitions (OpenAI or Anthropic format) |
+| `tool_handlers` | `Record<string, string>` | ✓ | Tool name → handler URL mapping |
+| `model` | `RouvaModel` | ✓ | Model to use — required for all `/run` requests |
+| `provider` | `RouvaProvider` | | Force a specific provider |
+| `max_turns` | `number` | | Max loop iterations (default: 10) |
+| `max_tokens` | `number` | | Max tokens per turn (default: 4096) |
+| `temperature` | `number` | | Sampling temperature 0–1 |
+| `session_budget_usd` | `number` | | Hard USD cap across all turns |
+
+### Result shape
+
+```typescript
+interface RunResult {
+  content: string | null            // final model response text
+  turns: number                     // turns executed
+  tool_calls_made: number           // total tool calls dispatched
+  session_id: string                // groups all turns in the dashboard
+  finish_reason: string | null      // "stop", "end_turn", "max_turns", "session_budget_exceeded", "length", …
+  session_cost_usd: number          // cumulative cost across all turns
+  session_cost_incomplete?: boolean // a turn reported no usage — cost is a lower bound
+  routed_model?: string             // when Intelligent Routing chose a different model
+  requested_model?: string
+  error?: string                    // why a run that still returned 200 stopped early
+}
+```
+
+A non-2xx response throws a `RouvaError` (see [Errors](#errors)); its `body` keeps the partial `turns`, `session_id` and `session_cost_usd`.
+
+### When to use `run()` vs `chat.completions.create()`
+
+| | `rouva.run()` | `chat.completions.create()` |
+|---|---|---|
+| Tool loop | Gateway-managed | Client-managed |
+| Session grouping | Automatic | Manual (`startSession`) |
+| Streaming | No | Yes |
+| Use when | Fully delegating an agentic task | Building your own loop or need streaming |
+
 ## Agent session tracking
 
-Group all turns of an agent run under a single session ID so the Rouva dashboard can show per-session cost, token usage, and quality.
+Group all turns of an agent run under a single session ID so the Rouva dashboard can show per-session cost, token usage, and quality. Use this with `chat.completions.create()` when you manage the loop yourself.
 
 ```typescript
 const rouva = new Rouva({ apiKey: 'rva_...' })
@@ -228,9 +318,30 @@ console.log(res._rouva)
 // {
 //   model_used: 'gpt-4o-mini',
 //   provider_used: 'openai',
-//   task_type: 'summarize'
+//   task_type: 'summarize',
+//   dedup: true             // only when served from the duplicate-request cache
 // }
 ```
+
+## Errors
+
+Any non-2xx response throws a `RouvaError` (a subclass of `Error`, so existing `catch` blocks keep working):
+
+```typescript
+import { Rouva, RouvaError } from '@rouvanpm/rouva'
+
+try {
+  await rouva.chat.completions.create({ messages })
+} catch (e) {
+  if (e instanceof RouvaError && e.status === 429) {
+    console.log(e.refusal)     // 'key_cap' | 'member_cap' | 'rate' — Rouva refused before calling the provider
+    console.log(e.retryAfter)  // seconds, from Retry-After
+    console.log(e.error)       // the gateway's message
+  }
+}
+```
+
+`refusal` (header `X-Rouva-Refusal`) is set only when Rouva itself refused the request before contacting the provider: a monthly spend cap would be exceeded (`key_cap`, `member_cap`), the rate limit (`rate`), or — for spend-capped keys — a model with no known price (`unpriced`) or input whose cost can't be bounded (`unbounded`).
 
 ## Getting your API key
 

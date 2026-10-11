@@ -481,3 +481,106 @@ describe('sampling params', () => {
     })
   })
 })
+
+// ── 0.3.0: contract sync with the gateway (2026-10-11) ────────────────────────
+
+describe('0.3.0 — errors carry the refusal details', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  it('a spend-cap refusal throws RouvaError with status, refusal, retryAfter and the gateway message', async () => {
+    const { RouvaError } = await import('../src')
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'Monthly spend limit of $5.00 reached for this key.' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json', 'X-Rouva-Refusal': 'key_cap', 'Retry-After': '3600' },
+    }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err).toBeInstanceOf(Error)                       // existing catch blocks keep working
+    expect(err.status).toBe(429)
+    expect(err.refusal).toBe('key_cap')
+    expect(err.retryAfter).toBe(3600)
+    expect(err.error).toBe('Monthly spend limit of $5.00 reached for this key.')
+    expect(err.message).toMatch(/^\[Rouva\] Gateway error 429: /)   // same format as before
+  })
+
+  it('a provider error (no refusal header, plain text) still throws RouvaError with the raw body', async () => {
+    const { RouvaError } = await import('../src')
+    fetchMock.mockResolvedValue(new Response('upstream overloaded', { status: 503 }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err.refusal).toBeUndefined()
+    expect(err.retryAfter).toBeUndefined()
+    expect(err.body).toBe('upstream overloaded')
+  })
+})
+
+describe('0.3.0 — response metadata', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  it('X-Rouva-Dedup: 1 surfaces as _rouva.dedup (the semantic-cache field is gone)', async () => {
+    fetchMock.mockResolvedValue(new Response(streamFrom('data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'), {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream', 'X-Rouva-Dedup': '1', 'X-Rouva-Model': 'gpt-4o-mini', 'x-rouva-cache': 'hit' },
+    }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const res = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }) as { _rouva?: Record<string, unknown> }
+    expect(res._rouva).toEqual({ model_used: 'gpt-4o-mini', provider_used: undefined, task_type: undefined, dedup: true })
+    expect(res._rouva).not.toHaveProperty('cache')
+  })
+})
+
+describe('0.3.0 — new request fields reach the gateway', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  it('forwards max_completion_tokens and metadata', async () => {
+    fetchMock.mockResolvedValue(new Response(streamFrom('data: [DONE]\n\n'), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    await rouva.chat.completions.create({
+      model: 'claude-opus-5-5',
+      messages: [{ role: 'user', content: 'hi' }],
+      max_completion_tokens: 256,
+      metadata: { feature: 'search', team: 'growth' },
+    })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      model: 'claude-opus-5-5', max_completion_tokens: 256, metadata: { feature: 'search', team: 'growth' },
+    })
+  })
+})
+
+describe('0.3.0 — rouva.run()', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  const params = {
+    model: 'claude-haiku-4-5-20251001',
+    messages: [{ role: 'user' as const, content: 'Weather in Paris?' }],
+    tools: [{ name: 'get_weather', description: 'Get weather', input_schema: { type: 'object', properties: {} } }],
+    tool_handlers: { get_weather: 'https://api.example.com/weather' },
+    max_turns: 5,
+  }
+
+  it('POSTs to /api/gateway/run with Bearer auth and returns the run result', async () => {
+    const result = { content: 'Sunny', turns: 2, tool_calls_made: 1, session_id: 'rva-sess-1', finish_reason: 'end_turn', session_cost_usd: 0.0012 }
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key', baseURL: 'https://app.rouva.io/' })
+    expect(await rouva.run(params)).toEqual(result)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://app.rouva.io/api/gateway/run')
+    expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer rva_test_key')
+    expect(JSON.parse(init.body as string)).toEqual(params)
+  })
+
+  it('a non-2xx run throws RouvaError whose body keeps the partial turns and cost', async () => {
+    const { RouvaError } = await import('../src')
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'Spend accounting failed for this turn', turns: 2, session_id: 'rva-sess-1', session_cost_usd: 0.004 }), {
+      status: 503, headers: { 'Content-Type': 'application/json', 'Retry-After': '10' },
+    }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.run(params).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err.message).toMatch(/^\[Rouva\] Run error 503: /)
+    expect(err.retryAfter).toBe(10)
+    expect(err.body).toMatchObject({ turns: 2, session_cost_usd: 0.004 })
+  })
+})

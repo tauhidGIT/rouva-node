@@ -423,14 +423,16 @@ export function getRouvaMetadata(headers: Headers): RouvaResponseMeta | undefine
   const modelUsed = headers.get('x-rouva-model') ?? undefined
   const providerUsed = headers.get('x-rouva-provider') ?? undefined
   const taskType = headers.get('x-rouva-task') ?? undefined
-  const cache = headers.get('x-rouva-cache') ?? undefined
+  // Duplicate-request cache hit (an identical request within 60s, not charged).
+  // (The old x-rouva-cache header went away with the semantic cache.)
+  const dedup = headers.get('x-rouva-dedup') === '1' ? true : undefined
 
-  if (!modelUsed && !providerUsed && !taskType && !cache) return undefined
+  if (!modelUsed && !providerUsed && !taskType && !dedup) return undefined
 
   return {
     model_used: modelUsed,
     provider_used: providerUsed,
     task_type: taskType,
-    cache,
+    ...(dedup ? { dedup } : {}),
   }
 }
