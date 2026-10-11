@@ -420,9 +420,11 @@ export async function readChatCompletionFromSse(
 }
 
 export function getRouvaMetadata(headers: Headers): RouvaResponseMeta | undefined {
-  const modelUsed = headers.get('x-rouva-model') ?? undefined
-  const providerUsed = headers.get('x-rouva-provider') ?? undefined
-  const taskType = headers.get('x-rouva-task') ?? undefined
+  // An empty header (e.g. X-Rouva-Task on a duplicate-cache hit) means unknown.
+  const read = (name: string) => headers.get(name) || undefined
+  const modelUsed = read('x-rouva-model')
+  const providerUsed = read('x-rouva-provider')
+  const taskType = read('x-rouva-task')
   // Duplicate-request cache hit (an identical request within 60s, not charged).
   // (The old x-rouva-cache header went away with the semantic cache.)
   const dedup = headers.get('x-rouva-dedup') === '1' ? true : undefined

@@ -1,3 +1,9 @@
+/** Per-call options. */
+export interface RequestOptions {
+  /** Abort the request (e.g. a long `run()` the user navigated away from). */
+  signal?: AbortSignal
+}
+
 export interface RouvaOptions {
   /** Your Rouva gateway API key (rva_...) */
   apiKey: string
@@ -72,9 +78,14 @@ export type RouvaProvider =
  * Supported models across all providers (the gateway's list as of SDK 0.3.0).
  * Omit `model` entirely to let Rouva route to the cheapest capable model automatically.
  *
- * Other IDs are accepted by the type for forward compatibility, but the
- * gateway only serves models it can price: an ID missing from its pricing
- * (the built-in list plus its synced model registry) returns a 404.
+ * Other IDs are accepted by the type for forward compatibility. On
+ * `chat.completions.create()` the gateway only serves models it can price
+ * (its built-in list plus its synced model registry); any other ID returns a
+ * 404. `run()` also accepts IDs whose provider it can infer from the name,
+ * logging them without a cost unless the key is spend-capped or the run has a
+ * `session_budget_usd` (then an unpriced model is refused).
+ *
+ * `'gpt-5.6'` is a deprecated alias the gateway maps to `'gpt-5.6-sol'`.
  */
 export type RouvaModel =
   // Anthropic
@@ -97,8 +108,7 @@ export type RouvaModel =
   | 'gpt-5.6-sol'
   | 'gpt-5.6-terra'
   | 'gpt-5.6-luna'
-  /** @deprecated Alias the gateway maps to `gpt-5.6-sol`; name that instead. */
-  | 'gpt-5.6'
+  | 'gpt-5.6'   // deprecated alias of gpt-5.6-sol
   | 'gpt-5'
   | 'gpt-5.4-mini'
   | 'gpt-5-mini'
@@ -167,8 +177,11 @@ export interface ChatCompletionParams {
   /**
    * Target model — omit to let Rouva route intelligently to the cheapest
    * capable model. With Intelligent Routing on, a named model is a price
-   * ceiling: Rouva may substitute a cheaper capable one, never a pricier one
-   * (retries after a provider error included).
+   * ceiling for Rouva's own choices: it may substitute a cheaper capable model,
+   * never a pricier one (retries after a provider error included). Two
+   * exceptions: an account routing override set by the workspace owner applies
+   * as policy, even if pricier; and with `provider` also set, the exact model
+   * is used (no substitution).
    */
   model?: RouvaModel
   /**
@@ -181,8 +194,9 @@ export interface ChatCompletionParams {
   /** OpenAI's newer name for `max_tokens`; the gateway accepts either. */
   max_completion_tokens?: number
   /**
-   * Your own labels for the request (up to 10 string key-value pairs, keys up
-   * to 64 characters), stored with its usage record. Not sent to the provider.
+   * Your own labels for the request, stored with its usage record and not
+   * sent to the provider: up to 10 string key-value pairs, keys up to 64
+   * characters, values up to 256 characters, no null bytes.
    */
   metadata?: Record<string, string>
   /**
@@ -360,8 +374,8 @@ export interface RunResult {
   /** Session ID — all turns are grouped under this ID in the Rouva dashboard. */
   session_id: string
   /**
-   * Why the loop exited: the model's own finish reason when it stopped
-   * (`"stop"`, `"end_turn"`), `"max_turns"` (turn limit reached),
+   * Why the loop exited: `"stop"` (the model finished — reported as "stop" for
+   * every provider), `"max_turns"` (turn limit reached),
    * `"session_budget_exceeded"` (session_budget_usd hit), or a truncation
    * reason such as `"length"` / `"max_tokens"` (then `error` explains it).
    */

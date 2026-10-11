@@ -102,24 +102,28 @@ const res = await rouva.chat.completions.create({
 - **`max_tokens`** / **`max_completion_tokens`** — either name works. Values below 1024 also steer auto-routing away from reasoning models, which would otherwise spend the whole budget on hidden reasoning tokens.
 - **`top_p`** — nucleus sampling; `top_p: 1` is treated as omitted. OpenAI reasoning models don't support it: routing avoids them when it's set, and pinning one returns a 400. The gateway omits it for the Claude models that reject it (as for `temperature`).
 - **`stop`** — a string or up to 4 stop sequences (Anthropic receives them as `stop_sequences`). OpenAI and xAI reasoning models (e.g. gpt-5, grok-4.5 / 4.6 / 4.7) reject it: routing avoids them when it's set, and pinning one returns a 400.
-- **`metadata`** — up to 10 string key-value pairs (keys up to 64 characters) stored with the request's usage record; not sent to the provider.
+- **`metadata`** — up to 10 string key-value pairs (keys up to 64 characters, values up to 256, no null bytes) stored with the request's usage record; not sent to the provider.
 - **`seed`** — best-effort deterministic sampling. Only OpenAI honors it, so it requires an OpenAI `model` and pins the request to that exact model (no routing, no fallbacks).
 
 Unsupported OpenAI options (`response_format`, `logit_bias`, `n > 1`, the legacy `functions`/`function_call` fields, …) are rejected by the gateway with an explicit 400 rather than silently ignored.
 
 ## Unlisted models
 
-The gateway serves the models it can price — its built-in list (see `RouvaModel` and rouva.io/docs) plus models added to its synced model registry, such as new snapshots. Any other ID returns a `404` immediately:
+`chat.completions.create()` serves the models the gateway can price — its built-in list (see `RouvaModel` and rouva.io/docs) plus models added to its synced model registry, such as new snapshots. Any other ID returns a `404` immediately:
 
 ```json
 { "error": "The model `<id>` does not exist or is not supported. See rouva.io/docs for the supported model list." }
 ```
 
+`run()` also accepts an ID whose provider it can infer from the name (e.g. a dated snapshot); without a known price it's logged with no cost, and it's refused for spend-capped keys or runs with `session_budget_usd`.
+
+`'gpt-5.6'` is a deprecated alias for `'gpt-5.6-sol'` — use the full name.
+
 ## OpenAI-compatible endpoint
 
 Using the OpenAI SDK (or LangChain, the Vercel AI SDK, …) instead of this one? The gateway is also served at `POST /v1/chat/completions` — point `baseURL` at `https://app.rouva.io/v1` with your `rva_` key and it behaves exactly like OpenAI: `model` is required, responses are buffered JSON unless `stream: true`, and only OpenAI-format providers are available (use this SDK or the native endpoint for Anthropic models).
 
-Non-tools requests on `/v1` always honor the named model exactly. **Tools requests on `/v1` benefit from within-provider intelligent routing** when Intelligent Routing is enabled in your dashboard — Rouva picks the cheapest capable model within the same provider, using the named `model` as a cost ceiling. The provider never changes (tool schemas are provider-specific), and `response.model` reflects the model that actually served the request. Turn Intelligent Routing off in dashboard Settings → Gateway to always pin the exact model.
+Non-tools requests on `/v1` honor the named model exactly unless the workspace owner has set an account routing override for the task — overrides apply as policy on every endpoint, and on `/v1` one may route to Anthropic (the response is translated back to the OpenAI format). **Tools requests on `/v1` benefit from within-provider intelligent routing** when Intelligent Routing is enabled in your dashboard — Rouva picks the cheapest capable model within the same provider, using the named `model` as a cost ceiling. The provider never changes (tool schemas are provider-specific), and `response.model` reflects the model that actually served the request. Turn Intelligent Routing off in dashboard Settings → Gateway to always pin the exact model.
 
 ## Tool use
 
@@ -228,7 +232,7 @@ console.log(result.session_cost_usd)  // total USD spent
 1. The gateway sends your `messages` to the model (non-streaming)
 2. When the model returns tool calls, all handlers are dispatched **in parallel** via POST — the request body is `{ "name": "<tool>", "arguments": { …the model's input… } }`, and the response body is used as the tool result
 3. Results are appended and the loop continues
-4. The loop exits when the model stops (`finish_reason` `"stop"` / `"end_turn"`), `max_turns` is reached (`"max_turns"`), or `session_budget_usd` is reached (`"session_budget_exceeded"`). If the last turn's output is truncated, the run returns with `error` set and the truncation reason (e.g. `"length"`)
+4. The loop exits when the model stops (`finish_reason: "stop"`, for every provider), `max_turns` is reached (`"max_turns"`), or `session_budget_usd` is reached (`"session_budget_exceeded"`). If the last turn's output is truncated, the run returns with `error` set and the truncation reason (e.g. `"length"`)
 
 Every turn is logged as a usage snapshot in the Rouva dashboard under the shared `session_id`, giving you a full session replay with per-turn cost, model used and tool calls. (Tool-loop turns aren't quality-scored.)
 
@@ -260,7 +264,7 @@ interface RunResult {
   turns: number                     // turns executed
   tool_calls_made: number           // total tool calls dispatched
   session_id: string                // groups all turns in the dashboard
-  finish_reason: string | null      // "stop", "end_turn", "max_turns", "session_budget_exceeded", "length", …
+  finish_reason: string | null      // "stop", "max_turns", "session_budget_exceeded", or a truncation reason ("length", …)
   session_cost_usd: number          // cumulative cost across all turns
   session_cost_incomplete?: boolean // a turn reported no usage — cost is a lower bound
   routed_model?: string             // when Intelligent Routing chose a different model
@@ -269,7 +273,7 @@ interface RunResult {
 }
 ```
 
-A non-2xx response throws a `RouvaError` (see [Errors](#errors)); its `body` keeps the partial `turns`, `session_id` and `session_cost_usd`.
+A non-2xx response throws a `RouvaError` (see [Errors](#errors)). Once the loop has started, its `body` also carries the partial `turns`, `session_id` and `session_cost_usd`; errors before the first turn (validation, no provider key, allowlist) carry only `error`. A run can take several minutes — pass `{ signal }` as the second argument to cancel it.
 
 ### When to use `run()` vs `chat.completions.create()`
 
@@ -341,7 +345,7 @@ try {
 }
 ```
 
-`refusal` (header `X-Rouva-Refusal`) is set only when Rouva itself refused the request before contacting the provider: a monthly spend cap would be exceeded (`key_cap`, `member_cap`), the rate limit (`rate`), or — for spend-capped keys — a model with no known price (`unpriced`) or input whose cost can't be bounded (`unbounded`).
+`refusal` (header `X-Rouva-Refusal`) names why Rouva itself refused the request before contacting the provider, when the gateway marks it: a monthly spend cap would be exceeded (`key_cap`, `member_cap`), the rate limit (`rate`), or — for spend-capped keys — a model with no known price (`unpriced`) or input whose cost can't be bounded (`unbounded`). Not every refusal is marked yet: a `429` with `retryAfter` but no `refusal` can still be a Rouva cap or rate-limit refusal — read `error`. Every call also takes `{ signal }` as a second argument to abort it.
 
 ## Getting your API key
 

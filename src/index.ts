@@ -19,4 +19,5 @@ export type {
   RouvaResponseMeta,
   RunParams,
   RunResult,
+  RequestOptions,
 } from './types'

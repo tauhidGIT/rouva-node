@@ -4,6 +4,7 @@ import type {
   ChatCompletion,
   RunParams,
   RunResult,
+  RequestOptions,
 } from './types'
 import {
   getRouvaMetadata,
@@ -21,7 +22,7 @@ export class Rouva {
 
   readonly chat: {
     completions: {
-      create(params: ChatCompletionParams): Promise<ChatCompletion | ReadableStream>
+      create(params: ChatCompletionParams, options?: RequestOptions): Promise<ChatCompletion | ReadableStream>
     }
   }
 
@@ -36,7 +37,7 @@ export class Rouva {
 
     this.chat = {
       completions: {
-        create: (params: ChatCompletionParams) => this._createChatCompletion(params),
+        create: (params: ChatCompletionParams, options?: RequestOptions) => this._createChatCompletion(params, options),
       },
     }
   }
@@ -71,7 +72,10 @@ export class Rouva {
    * `{ name, arguments }` (in parallel), feeds the response bodies back as tool
    * results, and loops until the model stops or a limit is reached — no
    * streaming, no client-side loop required. Throws `RouvaError` on a non-2xx
-   * response (its `body` keeps the partial `turns` / `session_cost_usd`).
+   * response; once the loop has started, its `body` also carries the partial
+   * `turns`, `session_id` and `session_cost_usd` (errors before the first turn
+   * — validation, no key, allowlist — carry only `error`). Pass
+   * `{ signal }` to cancel; a run can take several minutes.
    *
    * Every turn is logged as a usage snapshot grouped by `session_id` in the
    * Rouva dashboard, giving you a full session replay with per-turn cost,
@@ -89,28 +93,30 @@ export class Rouva {
    * console.log(result.turns)        // how many turns it took
    * console.log(result.session_id)   // dashboard session ID
    */
-  async run(params: RunParams): Promise<RunResult> {
-    const url = `${this.baseURL}/api/gateway/run`
+  async run(params: RunParams, options?: RequestOptions): Promise<RunResult> {
+    const res = await this._post('/api/gateway/run', params, {}, options)
+    if (!res.ok) throw await toRouvaError('Run', res)
+    return res.json() as Promise<RunResult>
+  }
 
-    const res = await fetch(url, {
+  // One request path for every endpoint: auth, JSON body, optional abort signal.
+  private _post(path: string, body: unknown, extraHeaders: Record<string, string>, options?: RequestOptions): Promise<Response> {
+    return fetch(`${this.baseURL}${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
+        ...extraHeaders,
       },
-      body: JSON.stringify(params),
+      body: JSON.stringify(body),
+      ...(options?.signal ? { signal: options.signal } : {}),
     })
-
-    if (!res.ok) throw await toRouvaError('Run', res)
-
-    return res.json() as Promise<RunResult>
   }
 
   private async _createChatCompletion(
-    params: ChatCompletionParams
+    params: ChatCompletionParams,
+    options?: RequestOptions
   ): Promise<ChatCompletion | ReadableStream> {
-    const url = `${this.baseURL}/api/gateway/messages`
-
     // `stream` is a client-side toggle (return the raw stream vs a buffered
     // completion) and never reaches the wire: the SDK always requests SSE
     // and normalizes it, keeping a single parsing path for both modes and
@@ -119,17 +125,8 @@ export class Rouva {
     // mode still consumes the stream.)
     const { stream: _stream, ...body } = params
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${this.apiKey}`,
-    }
-    if (this._sessionId) headers['x-rouva-session-id'] = this._sessionId
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    })
+    const sessionHeader: Record<string, string> = this._sessionId ? { 'x-rouva-session-id': this._sessionId } : {}
+    const res = await this._post('/api/gateway/messages', body, sessionHeader, options)
 
     if (!res.ok) throw await toRouvaError('Gateway', res)
 

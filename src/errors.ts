@@ -7,12 +7,13 @@ export class RouvaError extends Error {
   /** HTTP status from the gateway. */
   readonly status: number
   /**
-   * Why Rouva itself refused the request before contacting the provider
-   * (header `X-Rouva-Refusal`): `"key_cap"` / `"member_cap"` (a monthly spend
-   * cap would be exceeded), `"rate"` (rate limit), `"unpriced"` (a capped key
-   * can't use a model with no known price), `"unbounded"` (a capped key can't
-   * send input whose cost can't be bounded). Undefined for other errors,
-   * including errors returned by the provider.
+   * Why Rouva itself refused the request before contacting the provider, when
+   * the gateway marks it (header `X-Rouva-Refusal`): `"key_cap"` /
+   * `"member_cap"` (a monthly spend cap would be exceeded), `"rate"` (rate
+   * limit), `"unpriced"` (a capped key can't use a model with no known price),
+   * `"unbounded"` (a capped key can't send input whose cost can't be bounded).
+   * Not every refusal carries it yet — a 429 with `retryAfter` and no
+   * `refusal` can still be a Rouva cap or rate refusal; read `error`.
    */
   readonly refusal?: string
   /** Seconds to wait before retrying, from `Retry-After`, when present. */
