@@ -630,3 +630,34 @@ describe('0.3.0 — review follow-ups', () => {
     expect(fetchMock.mock.calls[0][1].headers['x-rouva-session-id']).toBe(id)
   })
 })
+
+describe('0.3.0 — a body that fails mid-response is an error, never a truncated success (Codex P1)', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  function failingBody(): ReadableStream<Uint8Array> {
+    let sent = false
+    return new ReadableStream({
+      pull(controller) {
+        if (!sent) {
+          sent = true
+          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n'))
+          return
+        }
+        controller.error(new DOMException('The operation was aborted.', 'AbortError'))
+      },
+    })
+  }
+
+  it('buffered: create() rejects instead of resolving with partial content', async () => {
+    fetchMock.mockResolvedValue(new Response(failingBody(), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    await expect(rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] })).rejects.toThrow(/aborted/)
+  })
+
+  it('streaming: the consumer sees the error, not a normal end', async () => {
+    fetchMock.mockResolvedValue(new Response(failingBody(), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const stream = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }], stream: true }) as ReadableStream<Uint8Array>
+    await expect(readStream(stream)).rejects.toThrow(/aborted/)
+  })
+})

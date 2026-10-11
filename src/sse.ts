@@ -286,8 +286,12 @@ export function normalizeGatewayStream(
             }
           }
         }
-      } finally {
         controller.close()
+      } catch (err) {
+        // A failed body read (an aborted request, a dropped connection) must
+        // surface as an error — closing here turned it into a clean EOF, so a
+        // buffered call resolved with a truncated completion.
+        controller.error(err)
       }
     },
   })
