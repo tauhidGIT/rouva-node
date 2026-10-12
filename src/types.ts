@@ -149,13 +149,14 @@ export type RouvaModel =
   | 'glm-5.2'
   | 'glm-4.7-flash'
   // Alibaba Qwen
+  // (qwen-turbo, qwen3-235b-a22b, qwen3-32b and qwen3-30b-a3b were retired by
+  // Alibaba on 2026-10-10 and removed in 0.3.1)
   | 'qwen3.8-omni-flash'
+  | 'qwen3.8-flash'
+  | 'qwen3.7-plus'
   | 'qwen-max'
   | 'qwen-plus'
-  | 'qwen-turbo'
-  | 'qwen3-235b-a22b'
-  | 'qwen3-32b'
-  | 'qwen3-30b-a3b'
+  | 'qwen-flash'
   // Allow any string for forward compatibility
   | (string & {})
 

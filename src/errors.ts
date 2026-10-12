@@ -12,8 +12,8 @@ export class RouvaError extends Error {
    * `"member_cap"` (a monthly spend cap would be exceeded), `"rate"` (rate
    * limit), `"unpriced"` (a capped key can't use a model with no known price),
    * `"unbounded"` (a capped key can't send input whose cost can't be bounded).
-   * Not every refusal carries it yet — a 429 with `retryAfter` and no
-   * `refusal` can still be a Rouva cap or rate refusal; read `error`.
+   * Every Rouva cap, rate-limit and pricing refusal carries it, so a 429
+   * without `refusal` came from the provider, not from Rouva.
    */
   readonly refusal?: string
   /** Seconds to wait before retrying, from `Retry-After`, when present. */
