@@ -345,7 +345,7 @@ try {
 }
 ```
 
-`refusal` (header `X-Rouva-Refusal`) names why Rouva itself refused the request before contacting the provider, when the gateway marks it: a monthly spend cap would be exceeded (`key_cap`, `member_cap`), the rate limit (`rate`), or — for spend-capped keys — a model with no known price (`unpriced`) or input whose cost can't be bounded (`unbounded`). Not every refusal is marked yet: a `429` with `retryAfter` but no `refusal` can still be a Rouva cap or rate-limit refusal — read `error`. Every call also takes `{ signal }` as a second argument to abort it.
+`refusal` (header `X-Rouva-Refusal`) names why Rouva itself refused the request before contacting the provider, when the gateway marks it: a monthly spend cap would be exceeded (`key_cap`, `member_cap`), the rate limit (`rate`), or — for spend-capped keys — a model with no known price (`unpriced`) or input whose cost can't be bounded (`unbounded`). Every Rouva refusal is marked, so a `429` without `refusal` came from the provider, not from Rouva. Every call also takes `{ signal }` as a second argument to abort it.
 
 ## Getting your API key
 

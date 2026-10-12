@@ -1,6 +1,6 @@
 {
   "name": "@rouvanpm/rouva",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Official Node.js SDK for Rouva — managed AI gateway with intelligent routing and spend tracking",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -17,7 +17,8 @@
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run lint && npm test && npm run build"
   },
   "files": [
     "dist"
