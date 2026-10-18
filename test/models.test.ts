@@ -11,4 +11,13 @@ describe('RouvaModel', () => {
   it.each(['qwen-flash', 'qwen3.8-flash', 'qwen3.7-plus'])('lists %s', (id) => {
     expect(types).toContain(`| '${id}'`)
   })
+
+  // 0.3.2: removed / renamed upstream. Not a breaking change: RouvaModel ends with
+  // (string & {}), so these ids still type-check — only autocomplete drops them.
+  it.each(['gpt-4.1-nano', 'deepseek-v4-flash', 'deepseek-v4-flash-think', 'deepseek-flash-4-1'])('does not list removed %s', (id) => {
+    expect(types).not.toContain(`| '${id}'`)
+  })
+  it.each(['deepseek-flash', 'deepseek-flash-think', 'deepseek-v4-pro', 'gpt-6-luna'])('lists %s', (id) => {
+    expect(types).toContain(`| '${id}'`)
+  })
 })

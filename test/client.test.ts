@@ -504,6 +504,20 @@ describe('0.3.0 — errors carry the refusal details', () => {
     expect(err.message).toMatch(/^\[Rouva\] Gateway error 429: /)   // same format as before
   })
 
+  it('0.3.2: a deadline refusal (504, X-Rouva-Refusal: deadline, Retry-After: 1) — nothing was sent, safe to retry', async () => {
+    const { RouvaError } = await import('../src')
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'This request ran out of time before OpenAI could be called. Please retry.', provider: 'openai' }), {
+      status: 504, headers: { 'Content-Type': 'application/json', 'X-Rouva-Refusal': 'deadline', 'Retry-After': '1' },
+    }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err.status).toBe(504)
+    expect(err.refusal).toBe('deadline')
+    expect(err.retryAfter).toBe(1)
+    expect(err.error).toMatch(/ran out of time/)
+  })
+
   it('an unmarked 429 (early cap check: no X-Rouva-Refusal) still exposes retryAfter and the gateway message', async () => {
     const { RouvaError } = await import('../src')
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'Monthly workspace spend limit of $50.00 reached.' }), {
