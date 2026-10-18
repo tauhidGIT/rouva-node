@@ -11,9 +11,14 @@ export class RouvaError extends Error {
    * the gateway marks it (header `X-Rouva-Refusal`): `"key_cap"` /
    * `"member_cap"` (a monthly spend cap would be exceeded), `"rate"` (rate
    * limit), `"unpriced"` (a capped key can't use a model with no known price),
-   * `"unbounded"` (a capped key can't send input whose cost can't be bounded).
-   * Every Rouva cap, rate-limit and pricing refusal carries it, so a 429
-   * without `refusal` came from the provider, not from Rouva.
+   * `"unbounded"` (a capped key can't send input, or use a model, whose cost
+   * can't be bounded), `"deadline"` (a 504: the request ran out of its time
+   * budget before the provider was called — nothing was sent, so it's safe to
+   * retry; `retryAfter` is set). Every Rouva cap, rate-limit, pricing and time
+   * refusal carries it, so a 429 or 504 without `refusal` came from the
+   * provider — except `rouva.run()`'s "Run deadline exceeded" 504, which is
+   * Rouva's but deliberately unmarked: earlier turns were billed and their
+   * tool handlers ran, so it must not be retried blindly.
    */
   readonly refusal?: string
   /** Seconds to wait before retrying, from `Retry-After`, when present. */

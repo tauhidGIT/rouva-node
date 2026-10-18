@@ -338,14 +338,14 @@ try {
   await rouva.chat.completions.create({ messages })
 } catch (e) {
   if (e instanceof RouvaError && e.status === 429) {
-    console.log(e.refusal)     // 'key_cap' | 'member_cap' | 'rate' — Rouva refused before calling the provider
+    console.log(e.refusal)     // 'key_cap' | 'member_cap' | 'rate' | … — Rouva refused before calling the provider
     console.log(e.retryAfter)  // seconds, from Retry-After
     console.log(e.error)       // the gateway's message
   }
 }
 ```
 
-`refusal` (header `X-Rouva-Refusal`) names why Rouva itself refused the request before contacting the provider, when the gateway marks it: a monthly spend cap would be exceeded (`key_cap`, `member_cap`), the rate limit (`rate`), or — for spend-capped keys — a model with no known price (`unpriced`) or input whose cost can't be bounded (`unbounded`). Every Rouva refusal is marked, so a `429` without `refusal` came from the provider, not from Rouva. Every call also takes `{ signal }` as a second argument to abort it.
+`refusal` (header `X-Rouva-Refusal`) names why Rouva itself refused the request before contacting the provider, when the gateway marks it: a monthly spend cap would be exceeded (`key_cap`, `member_cap`), the rate limit (`rate`), for spend-capped keys a model with no known price (`unpriced`) or input or a model whose cost can't be bounded (`unbounded`), or — a `504` — the request ran out of its time budget before the provider was called (`deadline`; nothing was sent, so it's safe to retry, and `retryAfter` is set). Every Rouva refusal is marked, so a `429` or `504` without `refusal` came from the provider, not from Rouva — with one exception: `rouva.run()` returns an unmarked `504` "Run deadline exceeded before completion" when the run runs out of time, because earlier turns were already billed and their tool handlers ran; check what completed before retrying it. Every call also takes `{ signal }` as a second argument to abort it.
 
 ## Getting your API key
 

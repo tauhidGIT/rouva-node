@@ -113,11 +113,12 @@ export type RouvaModel =
   | 'gpt-5.4-mini'
   | 'gpt-5-mini'
   | 'gpt-5-nano'
-  // OpenAI — GPT-4.1 family
+  // OpenAI — GPT-4.1 / 4o families: OpenAI retires these on 2027-01-14 (use
+  // gpt-6-luna); the gateway no longer routes to them on its own, but a request
+  // that names one still reaches it until then. (gpt-4.1-nano — OpenAI shuts it
+  // down on 2026-10-23 — was removed in 0.3.2.)
   | 'gpt-4.1'
   | 'gpt-4.1-mini'
-  | 'gpt-4.1-nano'
-  // OpenAI — GPT-4o family
   | 'gpt-4o'
   | 'gpt-4o-mini'
   // Gemini
@@ -127,11 +128,12 @@ export type RouvaModel =
   | 'gemini-3.5-flash-lite'
   | 'gemini-2.5-pro'
   | 'gemini-2.5-flash'
-  // DeepSeek
-  | 'deepseek-flash-4-1'
+  // DeepSeek (deepseek-flash-think = deepseek-flash with thinking on). The old
+  // ids deepseek-v4-flash, deepseek-v4-flash-think and deepseek-flash-4-1 were
+  // removed in 0.3.2; the gateway still maps them to these.
+  | 'deepseek-flash'
+  | 'deepseek-flash-think'
   | 'deepseek-v4-pro'
-  | 'deepseek-v4-flash'
-  | 'deepseek-v4-flash-think'
   // Mistral
   | 'mistral-large-latest'
   | 'mistral-small-latest'
