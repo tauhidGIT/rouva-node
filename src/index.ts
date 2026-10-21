@@ -22,6 +22,7 @@ export type {
   RouvaRequest,
   RouvaRequestStatus,
   ResponseFormat,
+  ReasoningEffort,
   RunParams,
   RunResult,
   RequestOptions,

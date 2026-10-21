@@ -208,3 +208,20 @@ describe('0.4.0 — response_format reaches the gateway', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).response_format).toEqual(response_format)
   })
 })
+
+describe('0.4.1 — reasoning_effort and parallel_tool_calls reach the gateway', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  it('forwards both verbatim', async () => {
+    fetchMock.mockResolvedValue(new Response(streamFrom('data: [DONE]\n\n'), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    await rouva.chat.completions.create({
+      model: 'gpt-6-luna',
+      messages,
+      tools: [{ type: 'function', function: { name: 'get_time', parameters: { type: 'object', properties: {} } } }],
+      reasoning_effort: 'none',
+      parallel_tool_calls: false,
+    })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ reasoning_effort: 'none', parallel_tool_calls: false })
+  })
+})

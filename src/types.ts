@@ -242,6 +242,26 @@ export interface ChatCompletionParams {
    */
   response_format?: ResponseFormat | null
   /**
+   * How hard a reasoning model thinks (gateway support since 2026-10-21).
+   * OpenAI models take it as is; Claude gets it as `output_config.effort`.
+   * Values depend on the model: gpt-5 / -mini / -nano take minimal–high;
+   * gpt-5.4-mini, gpt-5.6-*, gpt-6-luna / -sol take none–xhigh; gpt-6.1-sol
+   * low–xhigh; Claude Sonnet / Opus 4.6 low, medium, high, max; newer Claude
+   * models also xhigh; GPT-4 models and Claude Haiku 4.5 don't take it. Routing
+   * only picks a model that takes the value; a listed OpenAI or Claude model you
+   * name that doesn't is a 400 (other providers' models get the value as sent). On gpt-6-luna / -sol, `'none'` turns reasoning off (temperature,
+   * top_p and tools then work) and any other value turns it on (tools and
+   * top_p are then a 400). `rouva.run()` doesn't accept it.
+   * See https://rouva.io/docs#reasoning-effort
+   */
+  reasoning_effort?: ReasoningEffort | null
+  /**
+   * With `tools` only: `false` limits the model to at most one tool call per
+   * turn. Forwarded to OpenAI-format providers; for Claude the gateway sets
+   * `disable_parallel_tool_use` on `tool_choice`. `rouva.run()` doesn't accept it.
+   */
+  parallel_tool_calls?: boolean | null
+  /**
    * Stream the response. Client-side only — controls whether `create()`
    * returns a ReadableStream or a buffered ChatCompletion; never sent to
    * the gateway.
@@ -263,6 +283,9 @@ export interface ChatCompletionParams {
    */
   tool_choice?: string | Record<string, unknown>
 }
+
+/** `reasoning_effort` values the gateway accepts (which ones a model takes varies). */
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /** `response_format` values the gateway accepts. */
 export type ResponseFormat =

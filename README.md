@@ -105,8 +105,10 @@ const res = await rouva.chat.completions.create({
 - **`metadata`** — up to 10 string key-value pairs (keys up to 64 characters, values up to 256, no null bytes) stored with the request's usage record; not sent to the provider.
 - **`seed`** — best-effort deterministic sampling. Only OpenAI honors it, so it requires an OpenAI `model` and pins the request to that exact model (no routing, no fallbacks).
 - **`response_format`** — JSON mode or a JSON schema; see [Structured output](#structured-output).
+- **`reasoning_effort`** — `'none'` … `'xhigh'`, or `'max'` for Claude. Which values a model takes depends on the model; routing only picks one that takes yours; a listed OpenAI or Claude model you name that doesn't gets a 400, and other providers' models get the value as sent. On gpt-6-luna / gpt-6-sol, `'none'` turns reasoning off. See [the docs](https://rouva.io/docs#reasoning-effort).
+- **`parallel_tool_calls`** — with `tools`: `false` allows at most one tool call per turn (Claude included).
 
-Unsupported OpenAI options (`logit_bias`, `logprobs`, `reasoning_effort`, `n > 1`, the legacy `functions`/`function_call` fields, …) are rejected by the gateway with an explicit 400 rather than silently ignored.
+Unsupported OpenAI options (`logit_bias`, `logprobs`, `n > 1`, the legacy `functions`/`function_call` fields, …) are rejected by the gateway with an explicit 400 rather than silently ignored.
 
 ## Unlisted models
 
