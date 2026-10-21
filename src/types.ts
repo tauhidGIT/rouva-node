@@ -248,8 +248,8 @@ export interface ChatCompletionParams {
    * gpt-5.4-mini, gpt-5.6-*, gpt-6-luna / -sol take none–xhigh; gpt-6.1-sol
    * low–xhigh; Claude Sonnet / Opus 4.6 low, medium, high, max; newer Claude
    * models also xhigh; GPT-4 models and Claude Haiku 4.5 don't take it. Routing
-   * only picks a model that takes the value; a model you name that doesn't is
-   * a 400. On gpt-6-luna / -sol, `'none'` turns reasoning off (temperature,
+   * only picks a model that takes the value; a listed OpenAI or Claude model you
+   * name that doesn't is a 400 (other providers' models get the value as sent). On gpt-6-luna / -sol, `'none'` turns reasoning off (temperature,
    * top_p and tools then work) and any other value turns it on (tools and
    * top_p are then a 400). `rouva.run()` doesn't accept it.
    * See https://rouva.io/docs#reasoning-effort
