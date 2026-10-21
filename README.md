@@ -341,12 +341,15 @@ import type { RouvaStream } from '@rouvanpm/rouva'
 const stream = await rouva.chat.completions.create({ messages, stream: true }) as RouvaStream
 // ...consume the stream...
 
-const req = await rouva.requests.get(stream._rouva!.request_id!)
-console.log(req.status)        // 'pending' | 'incomplete' | 'settled' | 'scored'
-console.log(req.cost_usd)      // e.g. 0.000412
-console.log(req.saved_usd)     // vs the model you named (negative when the route cost more)
-console.log(req.quality_score) // 0–1, once scored
-console.log(req.dashboard_url) // opens it in your request log
+const id = stream._rouva?.request_id // absent on a duplicate-cache replay (cost 0)
+if (id) {
+  const req = await rouva.requests.get(id)
+  console.log(req.status)        // 'pending' | 'incomplete' | 'settled' | 'scored'
+  console.log(req.cost_usd)      // e.g. 0.000412
+  console.log(req.saved_usd)     // vs the model you named (negative when the route cost more)
+  console.log(req.quality_score) // 0–1, once scored
+  console.log(req.dashboard_url) // opens it in your request log
+}
 ```
 
 `pending` means it hasn't settled yet — retry after a moment. `incomplete` means it settled from partial usage (a stream cut short), so the provider may have billed more; `settled` and `scored` costs are final. A key reads only its own requests. A duplicate-cache replay has no `request_id` (nothing new was recorded or charged).
@@ -356,6 +359,8 @@ console.log(req.dashboard_url) // opens it in your request log
 `response_format` asks for JSON: `{ type: 'json_object' }` (JSON mode — your prompt must mention "json") or `{ type: 'json_schema', json_schema: { name, schema, strict } }` (the answer follows your schema). Rouva only routes to models that serve the format; see [the docs](https://rouva.io/docs#structured-output) for which models do.
 
 ```typescript
+import type { ChatCompletion } from '@rouvanpm/rouva'
+
 const res = await rouva.chat.completions.create({
   messages: [{ role: 'user', content: 'Extract the city: "Flying to Paris on Monday."' }],
   response_format: {

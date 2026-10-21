@@ -348,9 +348,10 @@ export interface RouvaResponseMeta {
   /** Why this model was chosen. */
   route_reason?: RouvaRouteReason
   /**
-   * What the request cost in USD, when the gateway sent it in a header (only
-   * on non-streaming responses, and only once the cost is final). The SDK
-   * streams, so read cost with `rouva.requests.get(request_id)`.
+   * What the request cost in USD, when the gateway sent it in a header: only
+   * on non-streaming responses once the cost is final, and as 0 on a
+   * duplicate-cache replay (`dedup: true`). The SDK streams, so otherwise read
+   * cost with `rouva.requests.get(request_id)`.
    */
   cost_usd?: number
   /** Saved against the model you named (or the priciest candidate), in USD; negative when the route cost more. Same availability as `cost_usd`. */
