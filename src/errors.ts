@@ -25,16 +25,24 @@ export class RouvaError extends Error {
   readonly retryAfter?: number
   /** The gateway's error message (`error` field), when the body is JSON. */
   readonly error?: string
+  /**
+   * The request's id in your Rouva request log (`X-Rouva-Request-Id`), when
+   * the error came after the request was recorded — e.g. a provider error.
+   * Look it up with `rouva.requests.get(requestId)`. Absent on errors Rouva
+   * returns before recording the request (validation 400s, auth).
+   */
+  readonly requestId?: string
   /** The parsed JSON body, or the raw text when it isn't JSON. */
   readonly body: unknown
 
-  constructor(kind: 'Gateway' | 'Run', status: number, headers: Headers, rawBody: string) {
+  constructor(kind: 'Gateway' | 'Run' | 'Request', status: number, headers: Headers, rawBody: string) {
     super(`[Rouva] ${kind} error ${status}: ${rawBody}`)
     this.name = 'RouvaError'
     this.status = status
     this.refusal = headers.get('x-rouva-refusal') ?? undefined
     const retry = Number(headers.get('retry-after'))
     this.retryAfter = headers.get('retry-after') !== null && Number.isFinite(retry) ? retry : undefined
+    this.requestId = headers.get('x-rouva-request-id') || headers.get('x-rouva-row-id') || undefined
     let parsed: unknown = rawBody
     try { parsed = JSON.parse(rawBody) } catch { /* plain text */ }
     this.body = parsed
@@ -43,7 +51,7 @@ export class RouvaError extends Error {
   }
 }
 
-export async function toRouvaError(kind: 'Gateway' | 'Run', res: Response): Promise<RouvaError> {
+export async function toRouvaError(kind: 'Gateway' | 'Run' | 'Request', res: Response): Promise<RouvaError> {
   const raw = await res.text().catch((err: unknown) => {
     // A cancellation while reading the error body is the caller's abort, not a
     // gateway error — rethrow it so it isn't mistaken for a refusal and retried.

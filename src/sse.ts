@@ -424,21 +424,31 @@ export async function readChatCompletionFromSse(
 }
 
 export function getRouvaMetadata(headers: Headers): RouvaResponseMeta | undefined {
-  // An empty header (e.g. X-Rouva-Task on a duplicate-cache hit) means unknown.
+  // An empty header (e.g. the task type on a duplicate-cache hit) means unknown.
   const read = (name: string) => headers.get(name) || undefined
-  const modelUsed = read('x-rouva-model')
-  const providerUsed = read('x-rouva-provider')
-  const taskType = read('x-rouva-task')
-  // Duplicate-request cache hit (an identical request within 60s, not charged).
-  // (The old x-rouva-cache header went away with the semantic cache.)
-  const dedup = headers.get('x-rouva-dedup') === '1' ? true : undefined
-
-  if (!modelUsed && !providerUsed && !taskType && !dedup) return undefined
-
-  return {
-    model_used: modelUsed,
-    provider_used: providerUsed,
-    task_type: taskType,
-    ...(dedup ? { dedup } : {}),
+  // A cost header is a fixed-point USD string; anything unparseable is dropped.
+  const usd = (name: string) => {
+    const raw = read(name)
+    const n = raw === undefined ? NaN : Number(raw)
+    return Number.isFinite(n) ? n : undefined
   }
+  const meta: RouvaResponseMeta = {
+    // X-Rouva-Row-Id is the same id under its older name.
+    request_id: read('x-rouva-request-id') ?? read('x-rouva-row-id'),
+    model_used: read('x-rouva-model'),
+    provider_used: read('x-rouva-provider'),
+    requested_model: read('x-rouva-requested-model'),
+    // X-Rouva-Task is the older name, still sent alongside.
+    task_type: read('x-rouva-task-type') ?? read('x-rouva-task'),
+    route_reason: read('x-rouva-route-reason'),
+    cost_usd: usd('x-rouva-cost-usd'),
+    saved_usd: usd('x-rouva-saved-usd'),
+    // Duplicate-request cache hit (an identical request within 60s, not charged).
+    // (The old x-rouva-cache header went away with the semantic cache.)
+    dedup: headers.get('x-rouva-dedup') === '1' ? true : undefined,
+  }
+  for (const key of Object.keys(meta) as Array<keyof RouvaResponseMeta>) {
+    if (meta[key] === undefined) delete meta[key]
+  }
+  return Object.keys(meta).length > 0 ? meta : undefined
 }
