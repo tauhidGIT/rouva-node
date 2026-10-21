@@ -80,13 +80,13 @@ while (true) {
 
 Streaming responses are normalized to OpenAI-style SSE chunks, even when Rouva routes the request to Anthropic.
 
-`stream` is a client-side toggle: `stream: true` returns the raw `ReadableStream`, omitting it (or `stream: false`) returns a buffered `ChatCompletion`. It is never sent to the gateway.
+`stream` is a client-side toggle: `stream: true` returns the raw `ReadableStream` (with the routing metadata on `_rouva` — see [Response metadata](#response-metadata)), omitting it (or `stream: false`) returns a buffered `ChatCompletion`. It is never sent to the gateway.
 
 ## Request parameters
 
 ```typescript
 const res = await rouva.chat.completions.create({
-  model: 'gpt-4o-mini',                    // required when using seed (OpenAI only)
+  model: 'gpt-6-luna',                     // required when using seed (OpenAI only)
   messages: [{ role: 'user', content: 'Write a haiku about routing.' }],
   system: 'You are a concise assistant.',  // string or Anthropic-style text blocks
   max_tokens: 1024,                        // default 4096 (or max_completion_tokens)
@@ -104,8 +104,9 @@ const res = await rouva.chat.completions.create({
 - **`stop`** — a string or up to 4 stop sequences (Anthropic receives them as `stop_sequences`). OpenAI and xAI reasoning models (e.g. gpt-5, grok-4.5 / 4.6 / 4.7) reject it: routing avoids them when it's set, and pinning one returns a 400.
 - **`metadata`** — up to 10 string key-value pairs (keys up to 64 characters, values up to 256, no null bytes) stored with the request's usage record; not sent to the provider.
 - **`seed`** — best-effort deterministic sampling. Only OpenAI honors it, so it requires an OpenAI `model` and pins the request to that exact model (no routing, no fallbacks).
+- **`response_format`** — JSON mode or a JSON schema; see [Structured output](#structured-output).
 
-Unsupported OpenAI options (`response_format`, `logit_bias`, `n > 1`, the legacy `functions`/`function_call` fields, …) are rejected by the gateway with an explicit 400 rather than silently ignored.
+Unsupported OpenAI options (`logit_bias`, `logprobs`, `reasoning_effort`, `n > 1`, the legacy `functions`/`function_call` fields, …) are rejected by the gateway with an explicit 400 rather than silently ignored.
 
 ## Unlisted models
 
@@ -313,18 +314,65 @@ Sessions are optional — requests without an active session are tracked individ
 
 ## Response metadata
 
-Parsed non-stream responses may include a `_rouva` field with gateway header metadata when available:
+Every response says what Rouva decided, in `_rouva` — on a buffered completion, and on the stream `stream: true` returns (the headers arrive before the first chunk):
 
 ```typescript
 const res = await rouva.chat.completions.create({ messages })
 
 console.log(res._rouva)
 // {
-//   model_used: 'gpt-4o-mini',
+//   request_id: '7c0e…',          // your request log's id for it
+//   model_used: 'gpt-6-luna',
 //   provider_used: 'openai',
+//   requested_model: 'gpt-6-sol', // only when Rouva served a different model
 //   task_type: 'summarize',
-//   dedup: true             // only when served from the duplicate-request cache
+//   route_reason: 'intelligent',  // override | allowlist | fallback | no_key_fallback | direct | escalation | dedup
+//   dedup: true                   // only when served from the duplicate-request cache
 // }
+```
+
+### Cost, savings and quality score — `rouva.requests.get(id)`
+
+A request's cost is known only once its last chunk has arrived, and its quality score once the judge has run, so read them back by `request_id`:
+
+```typescript
+import type { RouvaStream } from '@rouvanpm/rouva'
+
+const stream = await rouva.chat.completions.create({ messages, stream: true }) as RouvaStream
+// ...consume the stream...
+
+const id = stream._rouva?.request_id // absent on a duplicate-cache replay (cost 0)
+if (id) {
+  const req = await rouva.requests.get(id)
+  console.log(req.status)        // 'pending' | 'incomplete' | 'settled' | 'scored'
+  console.log(req.cost_usd)      // e.g. 0.000412
+  console.log(req.saved_usd)     // vs the model you named (negative when the route cost more)
+  console.log(req.quality_score) // 0–1, once scored
+  console.log(req.dashboard_url) // opens it in your request log
+}
+```
+
+`pending` means it hasn't settled yet — retry after a moment. `incomplete` means it settled from partial usage (a stream cut short), so the provider may have billed more; `settled` and `scored` costs are final. A key reads only its own requests. A duplicate-cache replay has no `request_id` (nothing new was recorded or charged).
+
+## Structured output
+
+`response_format` asks for JSON: `{ type: 'json_object' }` (JSON mode — your prompt must mention "json") or `{ type: 'json_schema', json_schema: { name, schema, strict } }` (the answer follows your schema). Rouva only routes to models that serve the format; see [the docs](https://rouva.io/docs#structured-output) for which models do.
+
+```typescript
+import type { ChatCompletion } from '@rouvanpm/rouva'
+
+const res = await rouva.chat.completions.create({
+  messages: [{ role: 'user', content: 'Extract the city: "Flying to Paris on Monday."' }],
+  response_format: {
+    type: 'json_schema',
+    json_schema: {
+      name: 'city',
+      strict: true,
+      schema: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'], additionalProperties: false },
+    },
+  },
+}) as ChatCompletion
+const { city } = JSON.parse(res.choices[0].message.content!)
 ```
 
 ## Errors
@@ -341,6 +389,7 @@ try {
     console.log(e.refusal)     // 'key_cap' | 'member_cap' | 'rate' | … — Rouva refused before calling the provider
     console.log(e.retryAfter)  // seconds, from Retry-After
     console.log(e.error)       // the gateway's message
+    console.log(e.requestId)   // when the request was recorded — rouva.requests.get(e.requestId)
   }
 }
 ```

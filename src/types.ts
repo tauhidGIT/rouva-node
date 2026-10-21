@@ -231,6 +231,17 @@ export interface ChatCompletionParams {
    */
   seed?: number
   /**
+   * Ask for JSON output (gateway support since 2026-10-20). `json_object` is
+   * JSON mode: the prompt (a message or `system`) must contain the word
+   * "json", or the gateway returns a 400. `json_schema` is Structured Outputs:
+   * the answer follows your schema. Routing only picks a model that serves the
+   * format; Claude models serve `json_schema` only (every object needs
+   * `additionalProperties: false`), and not when the conversation ends with an
+   * assistant message. `{ type: 'text' }` or `null` is the default (no-op).
+   * `rouva.run()` doesn't accept it. See https://rouva.io/docs#structured-output
+   */
+  response_format?: ResponseFormat | null
+  /**
    * Stream the response. Client-side only — controls whether `create()`
    * returns a ReadableStream or a buffered ChatCompletion; never sent to
    * the gateway.
@@ -252,6 +263,22 @@ export interface ChatCompletionParams {
    */
   tool_choice?: string | Record<string, unknown>
 }
+
+/** `response_format` values the gateway accepts. */
+export type ResponseFormat =
+  | { type: 'text' }
+  | { type: 'json_object' }
+  | {
+      type: 'json_schema'
+      json_schema: {
+        /** 1–64 letters, digits, underscores or dashes. */
+        name: string
+        /** A JSON Schema object. */
+        schema: Record<string, unknown>
+        strict?: boolean
+        description?: string
+      }
+    }
 
 /** Assistant message in a completed response; `tool_calls` present when the model requested tools */
 export interface ResponseMessage {
@@ -283,13 +310,52 @@ export interface ChatCompletion {
   _rouva?: RouvaResponseMeta
 }
 
+/**
+ * Why Rouva sent a request to the model it did (header `X-Rouva-Route-Reason`):
+ * `intelligent` (Intelligent Routing chose it), `override` (an account routing
+ * override), `allowlist` (a workspace member's allowed-model list),
+ * `fallback` (a retry after a provider error), `escalation` (`run()` stepped
+ * up a model), `no_key_fallback` (the named provider has no key, so a
+ * connected one stood in), `direct` (the model you named, as named), or
+ * `dedup` (a replay of an identical request — no new call was made).
+ */
+export type RouvaRouteReason =
+  | 'intelligent'
+  | 'override'
+  | 'allowlist'
+  | 'fallback'
+  | 'escalation'
+  | 'no_key_fallback'
+  | 'direct'
+  | 'dedup'
+  | (string & {})
+
 export interface RouvaResponseMeta {
-  /** Actual model used when exposed by the gateway */
+  /**
+   * The request's id in your Rouva request log (`X-Rouva-Request-Id`). Pass it
+   * to `rouva.requests.get(id)` for the request's cost, savings and quality
+   * score. Absent on a duplicate-cache replay (no new request was recorded).
+   */
+  request_id?: string
+  /** The model that served the request — after a fallback, the fallback model. */
   model_used?: string
-  /** Actual provider used when exposed by the gateway */
+  /** That model's provider, e.g. `openai`, `anthropic`. */
   provider_used?: string
-  /** Task type classified by Rouva when exposed by the gateway */
+  /** The model you named, when Rouva served a different one. */
+  requested_model?: string
+  /** Task type classified by Rouva, e.g. `code`; absent when not classified. */
   task_type?: string
+  /** Why this model was chosen. */
+  route_reason?: RouvaRouteReason
+  /**
+   * What the request cost in USD, when the gateway sent it in a header: only
+   * on non-streaming responses once the cost is final, and as 0 on a
+   * duplicate-cache replay (`dedup: true`). The SDK streams, so otherwise read
+   * cost with `rouva.requests.get(request_id)`.
+   */
+  cost_usd?: number
+  /** Saved against the model you named (or the priciest candidate), in USD; negative when the route cost more. Same availability as `cost_usd`. */
+  saved_usd?: number
   /**
    * True when the gateway answered from its duplicate-request cache (an
    * identical request within the last 60 seconds) instead of calling the
@@ -301,6 +367,49 @@ export interface RouvaResponseMeta {
    * so this is never set. Use `dedup`.
    */
   cache?: string
+}
+
+/**
+ * The stream `chat.completions.create({ stream: true })` returns: OpenAI-shaped
+ * SSE bytes, plus the routing metadata from the response headers (known
+ * before the first chunk).
+ */
+export type RouvaStream = ReadableStream<Uint8Array> & { _rouva?: RouvaResponseMeta }
+
+/**
+ * A request's settlement state: `pending` (not settled yet — in flight, or it
+ * never reached the provider), `incomplete` (settled from partial usage, e.g. a
+ * stream cut short — the provider may have billed more), `settled` (tokens and
+ * cost are final), `scored` (final, and a quality score is recorded).
+ */
+export type RouvaRequestStatus = 'pending' | 'incomplete' | 'settled' | 'scored' | (string & {})
+
+/** One request from your request log — `rouva.requests.get(id)`. */
+export interface RouvaRequest {
+  id: string
+  /** ISO timestamp. */
+  created_at: string
+  status: RouvaRequestStatus
+  provider: string
+  model: string
+  requested_model: string | null
+  task_type: string | null
+  route_reason: RouvaRouteReason | null
+  /** 0 while pending. */
+  input_tokens: number
+  output_tokens: number
+  /** USD; 0 while pending. Final once `status` is `settled` or `scored`. */
+  cost_usd: number
+  /** USD saved against the model you named (or the priciest candidate); negative when the route cost more. */
+  saved_usd: number
+  /** 0–1, or null until a score is recorded (or when none is). */
+  quality_score: number | null
+  /** Whether the judge scored it, or why not (then `quality_score` is the heuristic checks'). */
+  judge_status: string | null
+  finish_reason: string | null
+  session_id: string | null
+  /** Opens this request in the dashboard's request log. */
+  dashboard_url: string
 }
 
 export interface RunParams {

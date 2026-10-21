@@ -5,6 +5,8 @@ import type {
   RunParams,
   RunResult,
   RequestOptions,
+  RouvaRequest,
+  RouvaStream,
 } from './types'
 import {
   getRouvaMetadata,
@@ -22,8 +24,30 @@ export class Rouva {
 
   readonly chat: {
     completions: {
-      create(params: ChatCompletionParams, options?: RequestOptions): Promise<ChatCompletion | ReadableStream>
+      create(params: ChatCompletionParams, options?: RequestOptions): Promise<ChatCompletion | RouvaStream>
     }
+  }
+
+  readonly requests: {
+    /**
+     * Read one request from your request log (`GET /api/gateway/requests/{id}`)
+     * by the id a response carried (`_rouva.request_id`, header
+     * `X-Rouva-Request-Id`): its model, routing reason, tokens, cost, savings and
+     * quality score. A key reads only its own requests (another's id is a 404).
+     *
+     * A stream's cost is recorded just after its last chunk, and the quality
+     * score once the judge has run (a few seconds), so check `status`:
+     * `pending` → not settled yet, retry shortly; `incomplete` → settled from
+     * partial usage; `settled` → cost final; `scored` → cost final and scored.
+     * Throws `RouvaError` on a non-2xx response (a 503 carries `retryAfter`).
+     *
+     * @example
+     * const stream = await rouva.chat.completions.create({ messages, stream: true }) as RouvaStream
+     * // ...consume the stream...
+     * const req = await rouva.requests.get(stream._rouva!.request_id!)
+     * console.log(req.status, req.cost_usd, req.saved_usd)
+     */
+    get(id: string, options?: RequestOptions): Promise<RouvaRequest>
   }
 
   constructor(options: RouvaOptions) {
@@ -39,6 +63,10 @@ export class Rouva {
       completions: {
         create: (params: ChatCompletionParams, options?: RequestOptions) => this._createChatCompletion(params, options),
       },
+    }
+
+    this.requests = {
+      get: (id: string, options?: RequestOptions) => this._getRequest(id, options),
     }
   }
 
@@ -99,16 +127,33 @@ export class Rouva {
     return res.json() as Promise<RunResult>
   }
 
-  // One request path for every endpoint: auth, JSON body, optional abort signal.
+  private async _getRequest(id: string, options?: RequestOptions): Promise<RouvaRequest> {
+    if (typeof id !== 'string' || !id) throw new Error('[Rouva] request id is required')
+    const res = await this._fetch('GET', `/api/gateway/requests/${encodeURIComponent(id)}`, undefined, {}, options)
+    if (!res.ok) throw await toRouvaError('Request', res)
+    return res.json() as Promise<RouvaRequest>
+  }
+
   private _post(path: string, body: unknown, extraHeaders: Record<string, string>, options?: RequestOptions): Promise<Response> {
+    return this._fetch('POST', path, body, extraHeaders, options)
+  }
+
+  // One request path for every endpoint: auth, JSON body, optional abort signal.
+  private _fetch(
+    method: 'GET' | 'POST',
+    path: string,
+    body: unknown,
+    extraHeaders: Record<string, string>,
+    options?: RequestOptions,
+  ): Promise<Response> {
     return fetch(`${this.baseURL}${path}`, {
-      method: 'POST',
+      method,
       headers: {
-        'Content-Type': 'application/json',
+        ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
         'Authorization': `Bearer ${this.apiKey}`,
         ...extraHeaders,
       },
-      body: JSON.stringify(body),
+      ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
       ...(options?.signal ? { signal: options.signal } : {}),
     })
   }
@@ -116,7 +161,7 @@ export class Rouva {
   private async _createChatCompletion(
     params: ChatCompletionParams,
     options?: RequestOptions
-  ): Promise<ChatCompletion | ReadableStream> {
+  ): Promise<ChatCompletion | RouvaStream> {
     // `stream` is a client-side toggle (return the raw stream vs a buffered
     // completion) and never reaches the wire: the SDK always requests SSE
     // and normalizes it, keeping a single parsing path for both modes and
@@ -132,10 +177,16 @@ export class Rouva {
 
     if (!res.body) throw new Error('[Rouva] No response body from gateway')
 
-    const normalizedStream = normalizeGatewayStream(res.body)
+    const normalizedStream: RouvaStream = normalizeGatewayStream(res.body)
+    const metadata = getRouvaMetadata(res.headers)
 
-    if (params.stream) return normalizedStream
+    if (params.stream) {
+      // The headers arrive before the first chunk, so a stream carries the
+      // routing decision (and request_id, for its cost) like a completion.
+      if (metadata) normalizedStream._rouva = metadata
+      return normalizedStream
+    }
 
-    return readChatCompletionFromSse(normalizedStream, getRouvaMetadata(res.headers))
+    return readChatCompletionFromSse(normalizedStream, metadata)
   }
 }
