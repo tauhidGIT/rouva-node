@@ -263,7 +263,24 @@ describe('0.5.0 — rouva.explain()', () => {
     if (!e.would_send) expect(e.status).toBe(400)
   })
 
-  it('a bad key or the explain rate limit throws RouvaError', async () => {
+  it('a bad key throws RouvaError (401)', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'Invalid API key' }), { status: 401 }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.explain({ messages }).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err.status).toBe(401)
+    expect(err.error).toBe('Invalid API key')
+  })
+
+  it('passes an abort signal through', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(explanation), { status: 200 }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const controller = new AbortController()
+    await rouva.explain({ messages }, { signal: controller.signal })
+    expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal)
+  })
+
+  it('the explain rate limit throws RouvaError', async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'Rate limit exceeded: 60 explain requests per minute. Retry shortly.' }), { status: 429, headers: { 'X-Rouva-Refusal': 'rate', 'Retry-After': '60' } }))
     const rouva = new Rouva({ apiKey: 'rva_test_key' })
     const err = await rouva.explain({ messages }).catch((e) => e)
