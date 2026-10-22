@@ -130,7 +130,7 @@ Non-tools requests on `/v1` honor the named model exactly unless the workspace o
 
 ## Tool use
 
-Tools are forwarded to your target provider verbatim — define them in the **provider's own format** (OpenAI `{ type: "function", function: {...} }` or Anthropic `{ name, description, input_schema }`) and pin the matching `model`. Tool schemas are provider-specific, so `model` is required and the gateway returns a 400 without it. Models that don't support tools on Chat Completions (`gpt-6.1-sol`, `gpt-5.6-*`) also return a 400.
+Tools are forwarded to your target provider verbatim — define them in the **provider's own format** (OpenAI `{ type: "function", function: {...} }` or Anthropic `{ name, description, input_schema }`) and pin the matching `model`. Tool schemas are provider-specific, so `model` is required and the gateway returns a 400 without it. `gpt-6.1-sol` and `gpt-5.6-*` take tools only through OpenAI's Responses API: the gateway uses it for you and converts both ways, so you still send and receive Chat Completions (`seed`, `stop` and a `max_tokens` below 16 are a 400 there). `rouva.run()` still refuses these models.
 
 A tools request only ever moves to another model of the **same provider**: an account routing override for the task (when it targets the same provider), or — on the `/v1` endpoint with Intelligent Routing enabled — the cheapest capable model within that provider, using the named `model` as a cost ceiling (see [OpenAI-compatible endpoint](#openai-compatible-endpoint)). Otherwise the named model is honored exactly.
 
@@ -355,6 +355,25 @@ if (id) {
 ```
 
 `pending` means it hasn't settled yet — retry after a moment. `incomplete` means it settled from partial usage (a stream cut short), so the provider may have billed more; `settled` and `scored` costs are final. A key reads only its own requests. A duplicate-cache replay has no `request_id` (nothing new was recorded or charged).
+
+## Explain a routing decision — `rouva.explain()`
+
+A dry run: the model Rouva would pick for a request, why, and the most it could cost — without calling a provider, recording a request or reserving spend.
+
+```typescript
+const e = await rouva.explain({ model: 'gpt-6-sol', messages })
+
+if (e.would_send) {
+  console.log(e.model, e.provider)   // e.g. 'gpt-6-luna', 'openai'
+  console.log(e.route_reason)        // 'intelligent' | 'override' | 'allowlist' | 'direct' | …
+  console.log(e.task_type)           // e.g. 'summarize'
+  console.log(e.max_cost_usd)        // what a spend-capped key would reserve
+} else {
+  console.log(e.status, e.error)     // the refusal the real request would get
+}
+```
+
+It takes the same params as `chat.completions.create()`; pass `{ endpoint: 'v1' }` to explain the same body sent to `/v1/chat/completions`. The prompt is classified as for a real request, and explain has its own per-minute rate limit (a `RouvaError` with `refusal: 'rate'`). Not covered: the duplicate-request cache, a spend cap's remaining budget, and what the provider answers.
 
 ## Structured output
 

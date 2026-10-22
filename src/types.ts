@@ -250,8 +250,9 @@ export interface ChatCompletionParams {
    * models also xhigh; GPT-4 models and Claude Haiku 4.5 don't take it. Routing
    * only picks a model that takes the value; a listed OpenAI or Claude model you
    * name that doesn't is a 400 (other providers' models get the value as sent). On gpt-6-luna / -sol, `'none'` turns reasoning off (temperature,
-   * top_p and tools then work) and any other value turns it on (tools and
-   * top_p are then a 400). `rouva.run()` doesn't accept it.
+   * top_p and tools then work) and any other value turns it on (top_p is then
+   * a 400; tools are served through OpenAI's Responses API). `rouva.run()`
+   * doesn't accept it.
    * See https://rouva.io/docs#reasoning-effort
    */
   reasoning_effort?: ReasoningEffort | null
@@ -273,8 +274,10 @@ export interface ChatCompletionParams {
    * Anthropic `{ name, description, input_schema }`). Requires `model`.
    * Tool schemas are provider-specific, so a tools request only ever moves to
    * another model of the SAME provider (a routing override, or cheaper-model
-   * routing on /v1). Models that don't support tools on Chat Completions
-   * (gpt-6.1-sol, gpt-5.6-*) return a 400.
+   * routing on /v1). gpt-6.1-sol and gpt-5.6-* take tools only through
+   * OpenAI's Responses API: the gateway uses it for you and converts both ways
+   * (you still send and receive Chat Completions), and there `seed`, `stop` and
+   * a `max_tokens` below 16 are a 400. `rouva.run()` still refuses these models.
    */
   tools?: Array<Record<string, unknown>>
   /**
@@ -282,6 +285,65 @@ export interface ChatCompletionParams {
    * Only valid alongside `tools`.
    */
   tool_choice?: string | Record<string, unknown>
+}
+
+/**
+ * What `rouva.explain()` returns when the request would be sent: the model
+ * Rouva would pick, why, and the most it could cost — nothing was sent,
+ * recorded or reserved.
+ */
+export interface RouvaExplanation {
+  dry_run: true
+  would_send: true
+  endpoint: '/api/gateway/messages' | '/v1/chat/completions'
+  provider: string
+  model: string
+  /** The model you named, or null. */
+  requested_model: string | null
+  task_type: string | null
+  route_reason: RouvaRouteReason
+  /** How the prompt was classified (e.g. `jev`, `embedding`, `cache`). */
+  classified_by: string | null
+  /** Jev's confidence (0–1), when Jev classified it. */
+  classifier_confidence: number | null
+  classifier_latency_ms: number | null
+  max_tokens: number
+  stream: boolean
+  /** The model's billed rates in USD per million tokens, or null when it has no known price. */
+  price_per_1m: { input: number; output: number } | null
+  /**
+   * The most the request could cost in USD — what a spend-capped key reserves
+   * (the input as sent plus max_tokens of output, plus reasoning and
+   * summarization allowances where they apply). null: no known price.
+   */
+  max_cost_usd: number | null
+  /** A long conversation's older turns would be summarized first (Claude). */
+  summarize_history: boolean
+  spend_capped: boolean
+}
+
+/** What `rouva.explain()` returns when the real request would be refused. */
+export interface RouvaExplainedRefusal {
+  dry_run: true
+  would_send: false
+  /** The status the real request would get. */
+  status: number
+  /** The error it would get. */
+  error: unknown
+  /** `X-Rouva-Refusal`, when Rouva marks it (e.g. `unbounded`, `key_cap`). */
+  refusal: string | null
+  /** The model Rouva had chosen before refusing, when it had chosen one. */
+  provider: string | null
+  model: string | null
+  route_reason: RouvaRouteReason | null
+}
+
+export type RouvaExplainResult = RouvaExplanation | RouvaExplainedRefusal
+
+/** Options for `rouva.explain()`. */
+export interface ExplainOptions extends RequestOptions {
+  /** `'v1'` explains the same body sent to /v1/chat/completions (which pins the named model). */
+  endpoint?: 'messages' | 'v1'
 }
 
 /** `reasoning_effort` values the gateway accepts (which ones a model takes varies). */

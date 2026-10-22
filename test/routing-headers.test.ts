@@ -225,3 +225,51 @@ describe('0.4.1 — reasoning_effort and parallel_tool_calls reach the gateway',
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ reasoning_effort: 'none', parallel_tool_calls: false })
   })
 })
+
+describe('0.5.0 — rouva.explain()', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  const explanation = {
+    dry_run: true, would_send: true, endpoint: '/api/gateway/messages', provider: 'openai', model: 'gpt-6-luna',
+    requested_model: 'gpt-6-sol', task_type: 'summarize', route_reason: 'intelligent', classified_by: 'jev',
+    classifier_confidence: 0.94, classifier_latency_ms: 210, max_tokens: 4096, stream: true,
+    price_per_1m: { input: 0.1, output: 0.5 }, max_cost_usd: 0.002061, summarize_history: false, spend_capped: false,
+  }
+
+  it('POSTs the chat params (without stream) to /api/gateway/explain and returns the explanation', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(explanation), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const e = await rouva.explain({ model: 'gpt-6-sol', messages, stream: true })
+    expect(e).toEqual(explanation)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://app.rouva.io/api/gateway/explain')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ model: 'gpt-6-sol', messages })
+  })
+
+  it("{ endpoint: 'v1' } explains the /v1 path", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ...explanation, endpoint: '/v1/chat/completions' }), { status: 200 }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    await rouva.explain({ model: 'gpt-6-luna', messages }, { endpoint: 'v1' })
+    expect(fetchMock.mock.calls[0][0]).toBe('https://app.rouva.io/api/gateway/explain?endpoint=v1')
+  })
+
+  it('a refusal the real request would get resolves (would_send: false)', async () => {
+    const refusal = { dry_run: true, would_send: false, status: 400, error: 'bad', refusal: null, provider: 'openai', model: 'gpt-5', route_reason: 'direct' }
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(refusal), { status: 200 }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const e = await rouva.explain({ model: 'gpt-5', messages })
+    expect(e.would_send).toBe(false)
+    if (!e.would_send) expect(e.status).toBe(400)
+  })
+
+  it('a bad key or the explain rate limit throws RouvaError', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'Rate limit exceeded: 60 explain requests per minute. Retry shortly.' }), { status: 429, headers: { 'X-Rouva-Refusal': 'rate', 'Retry-After': '60' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.explain({ messages }).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err.refusal).toBe('rate')
+    expect(err.retryAfter).toBe(60)
+    expect(err.message).toMatch(/^\[Rouva\] Explain error 429/)
+  })
+})
