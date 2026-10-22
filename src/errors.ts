@@ -35,7 +35,7 @@ export class RouvaError extends Error {
   /** The parsed JSON body, or the raw text when it isn't JSON. */
   readonly body: unknown
 
-  constructor(kind: 'Gateway' | 'Run' | 'Request', status: number, headers: Headers, rawBody: string) {
+  constructor(kind: 'Gateway' | 'Run' | 'Request' | 'Explain', status: number, headers: Headers, rawBody: string) {
     super(`[Rouva] ${kind} error ${status}: ${rawBody}`)
     this.name = 'RouvaError'
     this.status = status
@@ -51,7 +51,7 @@ export class RouvaError extends Error {
   }
 }
 
-export async function toRouvaError(kind: 'Gateway' | 'Run' | 'Request', res: Response): Promise<RouvaError> {
+export async function toRouvaError(kind: 'Gateway' | 'Run' | 'Request' | 'Explain', res: Response): Promise<RouvaError> {
   const raw = await res.text().catch((err: unknown) => {
     // A cancellation while reading the error body is the caller's abort, not a
     // gateway error — rethrow it so it isn't mistaken for a refusal and retried.

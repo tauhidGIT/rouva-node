@@ -7,6 +7,8 @@ import type {
   RequestOptions,
   RouvaRequest,
   RouvaStream,
+  RouvaExplainResult,
+  ExplainOptions,
 } from './types'
 import {
   getRouvaMetadata,
@@ -136,6 +138,32 @@ export class Rouva {
 
   private _post(path: string, body: unknown, extraHeaders: Record<string, string>, options?: RequestOptions): Promise<Response> {
     return this._fetch('POST', path, body, extraHeaders, options)
+  }
+
+  /**
+   * Dry run (`POST /api/gateway/explain`): what Rouva would do with this
+   * request — the model and provider it would pick, why (`route_reason`), how
+   * the prompt was classified, and the most it could cost (`max_cost_usd`) —
+   * without calling a provider, recording a request or reserving spend. Takes
+   * the same params as `chat.completions.create()` (`stream` is ignored, as
+   * there). When the real request would be refused, resolves with
+   * `would_send: false` and the status and error it would get. Throws
+   * `RouvaError` for a bad key or the explain rate limit (429, `refusal: 'rate'`).
+   *
+   * The prompt is classified as for a real request. Not covered: the
+   * duplicate-request cache, a spend cap's remaining budget, provider errors.
+   *
+   * @example
+   * const e = await rouva.explain({ model: 'gpt-6-sol', messages })
+   * if (e.would_send) console.log(e.model, e.route_reason, e.max_cost_usd)
+   * else console.log(e.status, e.error)
+   */
+  async explain(params: ChatCompletionParams, options?: ExplainOptions): Promise<RouvaExplainResult> {
+    const { stream: _stream, ...body } = params
+    const query = options?.endpoint === 'v1' ? '?endpoint=v1' : ''
+    const res = await this._post(`/api/gateway/explain${query}`, body, {}, options)
+    if (!res.ok) throw await toRouvaError('Explain', res)
+    return res.json() as Promise<RouvaExplainResult>
   }
 
   // One request path for every endpoint: auth, JSON body, optional abort signal.
