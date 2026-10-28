@@ -72,10 +72,11 @@ export type RouvaProvider =
   | 'xai'
   | 'zai'
   | 'alibaba'
+  | 'minimax'
   | (string & {})
 
 /**
- * Supported models across all providers (the gateway's list as of SDK 0.3.0).
+ * Supported models across all providers (the gateway's list as of SDK 0.5.1).
  * Omit `model` entirely to let Rouva route to the cheapest capable model automatically.
  *
  * Other IDs are accepted by the type for forward compatibility. On
@@ -99,9 +100,12 @@ export type RouvaModel =
   | 'claude-sonnet-5-5'
   | 'claude-sonnet-5'
   | 'claude-sonnet-4-6'
+  | 'claude-haiku-5-5'
   | 'claude-haiku-4-5-20251001'
   // OpenAI — GPT-6 family
+  | 'gpt-6-astra'
   | 'gpt-6.1-sol'
+  | 'gpt-6.1-terra'
   | 'gpt-6-sol'
   | 'gpt-6-luna'
   // OpenAI — GPT-5 family
@@ -121,7 +125,8 @@ export type RouvaModel =
   | 'gpt-4.1-mini'
   | 'gpt-4o'
   | 'gpt-4o-mini'
-  // Gemini
+  // Gemini (gemini-4-argon: paid tier only)
+  | 'gemini-4-argon'
   | 'gemini-3.8-flash'
   | 'gemini-3.7-flash'
   | 'gemini-3.6-flash'
@@ -137,7 +142,8 @@ export type RouvaModel =
   // Mistral
   | 'mistral-large-latest'
   | 'mistral-small-latest'
-  // Moonshot
+  // Moonshot (Kimi retires kimi-k2.6 by the end of December 2026; use kimi-k3.1-pro)
+  | 'kimi-k3.1-pro'
   | 'kimi-k3'
   | 'kimi-k2.6'
   // xAI
@@ -159,6 +165,9 @@ export type RouvaModel =
   | 'qwen-max'
   | 'qwen-plus'
   | 'qwen-flash'
+  // MiniMax (ids are mixed case, as MiniMax's API spells them)
+  | 'MiniMax-M3.1-Flash'
+  | 'MiniMax-M3'
   // Allow any string for forward compatibility
   | (string & {})
 
@@ -206,7 +215,8 @@ export interface ChatCompletionParams {
    * Sampling temperature 0–1.
    * The gateway omits it for models that only accept their default: OpenAI
    * reasoning models (gpt-5 / gpt-6 families) and the Claude models that reject
-   * it (Opus 4.7 and newer, Sonnet 5 and newer, Fable).
+   * it (Opus 4.7 and newer, Sonnet 5 and newer, Haiku 5.5, Fable), and for
+   * models whose sampling is fixed (Kimi K3 / K3.1 Pro, MiniMax).
    */
   temperature?: number
   /**
@@ -214,7 +224,8 @@ export interface ChatCompletionParams {
    * default) is treated as omitted. OpenAI reasoning models (gpt-5 / gpt-6
    * families, o-series) don't support it: routing avoids them when top_p is
    * set, and pinning one returns a 400. The gateway omits it for the Claude
-   * models that reject it (Opus 4.7 and newer, Sonnet 5 and newer, Fable).
+   * models that reject it (Opus 4.7 and newer, Sonnet 5 and newer, Haiku 5.5, Fable),
+   * and for models whose sampling is fixed (Kimi K3 / K3.1 Pro, MiniMax).
    */
   top_p?: number
   /**
@@ -245,11 +256,11 @@ export interface ChatCompletionParams {
    * How hard a reasoning model thinks (gateway support since 2026-10-21).
    * OpenAI models take it as is; Claude gets it as `output_config.effort`.
    * Values depend on the model: gpt-5 / -mini / -nano take minimal–high;
-   * gpt-5.4-mini, gpt-5.6-*, gpt-6-luna / -sol take none–xhigh; gpt-6.1-sol
-   * low–xhigh; Claude Sonnet / Opus 4.6 low, medium, high, max; newer Claude
-   * models also xhigh; GPT-4 models and Claude Haiku 4.5 don't take it. Routing
+   * gpt-5.4-mini, gpt-5.6-*, gpt-6-luna / -sol, gpt-6.1-terra take none–xhigh;
+   * gpt-6.1-sol and gpt-6-astra low–xhigh; Claude Sonnet / Opus 4.6 low, medium,
+   * high, max; newer Claude models (incl. Haiku 5.5) also xhigh; GPT-4 models and Claude Haiku 4.5 don't take it. Routing
    * only picks a model that takes the value; a listed OpenAI or Claude model you
-   * name that doesn't is a 400 (other providers' models get the value as sent). On gpt-6-luna / -sol, `'none'` turns reasoning off (temperature,
+   * name that doesn't is a 400 (other providers' models get the value as sent). On gpt-6-luna / -sol and gpt-6.1-terra, `'none'` turns reasoning off (temperature,
    * top_p and tools then work) and any other value turns it on (top_p is then
    * a 400; tools are served through OpenAI's Responses API). `rouva.run()`
    * doesn't accept it.
@@ -274,7 +285,7 @@ export interface ChatCompletionParams {
    * Anthropic `{ name, description, input_schema }`). Requires `model`.
    * Tool schemas are provider-specific, so a tools request only ever moves to
    * another model of the SAME provider (a routing override, or cheaper-model
-   * routing on /v1). gpt-6.1-sol and gpt-5.6-* take tools only through
+   * routing on /v1). gpt-6.1-sol, gpt-6-astra and gpt-5.6-* take tools only through
    * OpenAI's Responses API: the gateway uses it for you and converts both ways
    * (you still send and receive Chat Completions), and there `seed`, `stop` and
    * a `max_tokens` below 16 are a 400. `rouva.run()` still refuses these models.
