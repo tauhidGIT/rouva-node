@@ -20,4 +20,12 @@ describe('RouvaModel', () => {
   it.each(['deepseek-flash', 'deepseek-flash-think', 'deepseek-v4-pro', 'gpt-6-luna'])('lists %s', (id) => {
     expect(types).toContain(`| '${id}'`)
   })
+
+  // 0.5.1: models the gateway added 2026-10-25 / 2026-10-27, and the MiniMax provider.
+  it.each(['gpt-6-astra', 'gpt-6.1-terra', 'claude-haiku-5-5', 'gemini-4-argon', 'kimi-k3.1-pro', 'MiniMax-M3.1-Flash', 'MiniMax-M3'])('lists %s', (id) => {
+    expect(types).toContain(`| '${id}'`)
+  })
+  it('lists the minimax provider', () => {
+    expect(types).toMatch(/export type RouvaProvider =[^;]*\| 'minimax'/)
+  })
 })

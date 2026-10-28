@@ -24,7 +24,7 @@ console.log(response.choices[0].message.content)
 
 ## Provider agnostic
 
-Rouva works with all connected providers — Anthropic, OpenAI, Gemini, DeepSeek, Mistral, Moonshot, xAI, Z.ai and Alibaba Qwen. You can request a specific model, force a specific provider, or omit both and let Rouva route to the cheapest capable model automatically.
+Rouva works with all connected providers — Anthropic, OpenAI, Gemini, DeepSeek, Mistral, Moonshot, xAI, Z.ai, Alibaba Qwen and MiniMax. You can request a specific model, force a specific provider, or omit both and let Rouva route to the cheapest capable model automatically.
 
 ```typescript
 // Request a specific model
@@ -98,14 +98,14 @@ const res = await rouva.chat.completions.create({
 })
 ```
 
-- **`temperature`** — sampling temperature between 0 and 1. The gateway omits it for models that only accept their default: OpenAI reasoning models (gpt-5 / gpt-6 families) and the Claude models that reject it (Opus 4.7 and newer, Sonnet 5 and newer, Fable).
+- **`temperature`** — sampling temperature between 0 and 1. The gateway omits it for models that only accept their default: OpenAI reasoning models (gpt-5 / gpt-6 families) and the Claude models that reject it (Opus 4.7 and newer, Sonnet 5 and newer, Haiku 5.5, Fable), and models whose sampling is fixed (Kimi K3 / K3.1 Pro, MiniMax).
 - **`max_tokens`** / **`max_completion_tokens`** — either name works. Values below 1024 also steer auto-routing away from reasoning models, which would otherwise spend the whole budget on hidden reasoning tokens.
 - **`top_p`** — nucleus sampling; `top_p: 1` is treated as omitted. OpenAI reasoning models don't support it: routing avoids them when it's set, and pinning one returns a 400. The gateway omits it for the Claude models that reject it (as for `temperature`).
 - **`stop`** — a string or up to 4 stop sequences (Anthropic receives them as `stop_sequences`). OpenAI and xAI reasoning models (e.g. gpt-5, grok-4.5 / 4.6 / 4.7) reject it: routing avoids them when it's set, and pinning one returns a 400.
 - **`metadata`** — up to 10 string key-value pairs (keys up to 64 characters, values up to 256, no null bytes) stored with the request's usage record; not sent to the provider.
 - **`seed`** — best-effort deterministic sampling. Only OpenAI honors it, so it requires an OpenAI `model` and pins the request to that exact model (no routing, no fallbacks).
 - **`response_format`** — JSON mode or a JSON schema; see [Structured output](#structured-output).
-- **`reasoning_effort`** — `'none'` … `'xhigh'`, or `'max'` for Claude. Which values a model takes depends on the model; routing only picks one that takes yours; a listed OpenAI or Claude model you name that doesn't gets a 400, and other providers' models get the value as sent. On gpt-6-luna / gpt-6-sol, `'none'` turns reasoning off. See [the docs](https://rouva.io/docs#reasoning-effort).
+- **`reasoning_effort`** — `'none'` … `'xhigh'`, or `'max'` for Claude. Which values a model takes depends on the model; routing only picks one that takes yours; a listed OpenAI or Claude model you name that doesn't gets a 400, and other providers' models get the value as sent. On gpt-6-luna / gpt-6-sol / gpt-6.1-terra, `'none'` turns reasoning off. See [the docs](https://rouva.io/docs#reasoning-effort).
 - **`parallel_tool_calls`** — with `tools`: `false` allows at most one tool call per turn (Claude included).
 
 Unsupported OpenAI options (`logit_bias`, `logprobs`, `n > 1`, the legacy `functions`/`function_call` fields, …) are rejected by the gateway with an explicit 400 rather than silently ignored.
@@ -130,7 +130,7 @@ Non-tools requests on `/v1` honor the named model exactly unless the workspace o
 
 ## Tool use
 
-Tools are forwarded to your target provider verbatim — define them in the **provider's own format** (OpenAI `{ type: "function", function: {...} }` or Anthropic `{ name, description, input_schema }`) and pin the matching `model`. Tool schemas are provider-specific, so `model` is required and the gateway returns a 400 without it. `gpt-6.1-sol` and `gpt-5.6-*` take tools only through OpenAI's Responses API: the gateway uses it for you and converts both ways, so you still send and receive Chat Completions (`seed`, `stop` and a `max_tokens` below 16 are a 400 there). `rouva.run()` still refuses these models.
+Tools are forwarded to your target provider verbatim — define them in the **provider's own format** (OpenAI `{ type: "function", function: {...} }` or Anthropic `{ name, description, input_schema }`) and pin the matching `model`. Tool schemas are provider-specific, so `model` is required and the gateway returns a 400 without it. `gpt-6.1-sol`, `gpt-6-astra` and `gpt-5.6-*` take tools only through OpenAI's Responses API: the gateway uses it for you and converts both ways, so you still send and receive Chat Completions (`seed`, `stop` and a `max_tokens` below 16 are a 400 there). `rouva.run()` still refuses these models.
 
 A tools request only ever moves to another model of the **same provider**: an account routing override for the task (when it targets the same provider), or — on the `/v1` endpoint with Intelligent Routing enabled — the cheapest capable model within that provider, using the named `model` as a cost ceiling (see [OpenAI-compatible endpoint](#openai-compatible-endpoint)). Otherwise the named model is honored exactly.
 
