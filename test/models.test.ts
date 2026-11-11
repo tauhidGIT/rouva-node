@@ -28,4 +28,9 @@ describe('RouvaModel', () => {
   it('lists the minimax provider', () => {
     expect(types).toMatch(/export type RouvaProvider =[^;]*\| 'minimax'/)
   })
+
+  // 0.5.2: Mistral Large 4 (gateway 2026-11-01).
+  it('lists mistral-large-4', () => {
+    expect(types).toContain(`| 'mistral-large-4'`)
+  })
 })

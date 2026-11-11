@@ -1,3 +1,5 @@
+import type { RouvaRefusal } from './types'
+
 /**
  * Thrown for any non-2xx gateway response. Extends Error and keeps the
  * message format of earlier versions (`[Rouva] Gateway error 429: …`), so
@@ -9,8 +11,11 @@ export class RouvaError extends Error {
   /**
    * Why Rouva itself refused the request before contacting the provider, when
    * the gateway marks it (header `X-Rouva-Refusal`): `"key_cap"` /
-   * `"member_cap"` (a monthly spend cap would be exceeded), `"rate"` (rate
-   * limit), `"unpriced"` (a capped key can't use a model with no known price),
+   * `"member_cap"` / `"customer_cap"` (a monthly spend cap — the key's, the
+   * workspace member's, or the `metadata.customer_id` customer's — would be
+   * exceeded), `"plan_limit"` (a 429: the account is on the Free plan and has
+   * used its requests for the month; `retryAfter` runs to the 1st of next
+   * month, UTC — or upgrade the plan), `"rate"` (rate limit), `"unpriced"` (a capped key can't use a model with no known price),
    * `"unbounded"` (a capped key can't send input, or use a model, whose cost
    * can't be bounded), `"deadline"` (a 504: the request ran out of its time
    * budget before the provider was called — nothing was sent, so it's safe to
@@ -20,7 +25,7 @@ export class RouvaError extends Error {
    * Rouva's but deliberately unmarked: earlier turns were billed and their
    * tool handlers ran, so it must not be retried blindly.
    */
-  readonly refusal?: string
+  readonly refusal?: RouvaRefusal
   /** Seconds to wait before retrying, from `Retry-After`, when present. */
   readonly retryAfter?: number
   /** The gateway's error message (`error` field), when the body is JSON. */

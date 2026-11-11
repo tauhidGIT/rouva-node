@@ -103,6 +103,7 @@ const res = await rouva.chat.completions.create({
 - **`top_p`** — nucleus sampling; `top_p: 1` is treated as omitted. OpenAI reasoning models don't support it: routing avoids them when it's set, and pinning one returns a 400. The gateway omits it for the Claude models that reject it (as for `temperature`).
 - **`stop`** — a string or up to 4 stop sequences (Anthropic receives them as `stop_sequences`). OpenAI and xAI reasoning models (e.g. gpt-5, grok-4.5 / 4.6 / 4.7) reject it: routing avoids them when it's set, and pinning one returns a 400.
 - **`metadata`** — up to 10 string key-value pairs (keys up to 64 characters, values up to 256, no null bytes) stored with the request's usage record; not sent to the provider.
+- **`service_tier`** — `'default'` (or Anthropic's `'standard_only'`) asks the provider for its standard tier; `'auto'`, the same as leaving it out, uses your provider account's own setting. Rouva bills standard prices, so other tiers (`flex`, `priority`, `scale`) are a 400.
 - **`seed`** — best-effort deterministic sampling. Only OpenAI honors it, so it requires an OpenAI `model` and pins the request to that exact model (no routing, no fallbacks).
 - **`response_format`** — JSON mode or a JSON schema; see [Structured output](#structured-output).
 - **`reasoning_effort`** — `'none'` … `'xhigh'`, or `'max'` for Claude. Which values a model takes depends on the model; routing only picks one that takes yours; a listed OpenAI or Claude model you name that doesn't gets a 400, and other providers' models get the value as sent. On gpt-6-luna / gpt-6-sol / gpt-6.1-terra, `'none'` turns reasoning off. See [the docs](https://rouva.io/docs#reasoning-effort).
@@ -258,6 +259,8 @@ Every turn is logged as a usage snapshot in the Rouva dashboard under the shared
 | `max_tokens` | `number` | | Max tokens per turn (default: 4096) |
 | `temperature` | `number` | | Sampling temperature 0–1 |
 | `session_budget_usd` | `number` | | Hard USD cap across all turns |
+| `metadata` | `Record<string, string>` | | Your labels (e.g. `customer_id`), stored with every turn's usage record |
+| `service_tier` | `ServiceTier` | | `'default'` / `'standard_only'` for the standard tier, or `'auto'` |
 
 ### Result shape
 
@@ -407,7 +410,7 @@ try {
   await rouva.chat.completions.create({ messages })
 } catch (e) {
   if (e instanceof RouvaError && e.status === 429) {
-    console.log(e.refusal)     // 'key_cap' | 'member_cap' | 'rate' | … — Rouva refused before calling the provider
+    console.log(e.refusal)     // 'key_cap' | 'plan_limit' | 'rate' | … — Rouva refused before calling the provider
     console.log(e.retryAfter)  // seconds, from Retry-After
     console.log(e.error)       // the gateway's message
     console.log(e.requestId)   // when the request was recorded — rouva.requests.get(e.requestId)
@@ -415,7 +418,7 @@ try {
 }
 ```
 
-`refusal` (header `X-Rouva-Refusal`) names why Rouva itself refused the request before contacting the provider, when the gateway marks it: a monthly spend cap would be exceeded (`key_cap`, `member_cap`), the rate limit (`rate`), for spend-capped keys a model with no known price (`unpriced`) or input or a model whose cost can't be bounded (`unbounded`), or — a `504` — the request ran out of its time budget before the provider was called (`deadline`; nothing was sent, so it's safe to retry, and `retryAfter` is set). Every Rouva refusal is marked, so a `429` or `504` without `refusal` came from the provider, not from Rouva — with one exception: `rouva.run()` returns an unmarked `504` "Run deadline exceeded before completion" when the run runs out of time, because earlier turns were already billed and their tool handlers ran; check what completed before retrying it. Every call also takes `{ signal }` as a second argument to abort it.
+`refusal` (header `X-Rouva-Refusal`) names why Rouva itself refused the request before contacting the provider, when the gateway marks it: a monthly spend cap would be exceeded (`key_cap`, `member_cap`, or `customer_cap` for a `metadata.customer_id` customer), the account is on the Free plan and has used its requests for the month (`plan_limit`, a `429`; `retryAfter` runs to the 1st of next month, UTC, or upgrade the plan), the rate limit (`rate`), for spend-capped keys a model with no known price (`unpriced`) or input or a model whose cost can't be bounded (`unbounded`), or — a `504` — the request ran out of its time budget before the provider was called (`deadline`; nothing was sent, so it's safe to retry, and `retryAfter` is set). Every Rouva refusal is marked, so a `429` or `504` without `refusal` came from the provider, not from Rouva — with one exception: `rouva.run()` returns an unmarked `504` "Run deadline exceeded before completion" when the run runs out of time, because earlier turns were already billed and their tool handlers ran; check what completed before retrying it. Every call also takes `{ signal }` as a second argument to abort it.
 
 ## Getting your API key
 

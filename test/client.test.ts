@@ -701,3 +701,42 @@ describe('0.3.0 — an abort while reading an error body stays an abort (Codex P
     expect(err.status).toBe(502)
   })
 })
+
+// ── 0.5.2: plan limits, run metadata, service_tier (gateway 2026-11) ─────────
+
+describe('0.5.2 — plan_limit refusal, run() metadata and service_tier', () => {
+  beforeEach(() => { fetchMock.mockReset() })
+
+  it('a plan_limit refusal (429 until the 1st, UTC) throws RouvaError with refusal and retryAfter', async () => {
+    const { RouvaError } = await import('../src')
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'This account has used its 10,000 requests for November on the Free plan.' }), {
+      status: 429, headers: { 'Content-Type': 'application/json', 'X-Rouva-Refusal': 'plan_limit', 'Retry-After': '1728000' },
+    }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    const err = await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e)
+    expect(err).toBeInstanceOf(RouvaError)
+    expect(err.status).toBe(429)
+    expect(err.refusal).toBe('plan_limit')
+    expect(err.retryAfter).toBe(1728000)
+    expect(err.error).toMatch(/Free plan/)
+  })
+
+  it('run() sends metadata and service_tier in the body', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ content: 'ok', turns: 1 }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    await rouva.run({
+      model: 'gpt-6-luna', messages: [{ role: 'user', content: 'hi' }], tools: [{}], tool_handlers: {},
+      metadata: { customer_id: 'acme' }, service_tier: 'default',
+    })
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.metadata).toEqual({ customer_id: 'acme' })
+    expect(body.service_tier).toBe('default')
+  })
+
+  it('create() sends service_tier in the body', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ id: 'x', object: 'chat.completion', created: 0, model: 'm', choices: [], usage: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const rouva = new Rouva({ apiKey: 'rva_test_key' })
+    await rouva.chat.completions.create({ messages: [{ role: 'user', content: 'hi' }], service_tier: 'standard_only' })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).service_tier).toBe('standard_only')
+  })
+})
