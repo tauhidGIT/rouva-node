@@ -33,4 +33,9 @@ describe('RouvaModel', () => {
   it('lists mistral-large-4', () => {
     expect(types).toContain(`| 'mistral-large-4'`)
   })
+
+  // 0.5.3: models the gateway added 2026-11-11.
+  it.each(['claude-fable-5-2', 'gemini-4-carbon', 'qwen3.7-flash'])('lists %s', (id) => {
+    expect(types).toContain(`| '${id}'`)
+  })
 })

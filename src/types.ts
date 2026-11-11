@@ -95,7 +95,7 @@ export type RouvaProvider =
   | (string & {})
 
 /**
- * Supported models across all providers (the gateway's list as of SDK 0.5.2).
+ * Supported models across all providers (the gateway's list as of SDK 0.5.3).
  * Omit `model` entirely to let Rouva route to the cheapest capable model automatically.
  *
  * Other IDs are accepted by the type for forward compatibility. On
@@ -109,6 +109,7 @@ export type RouvaProvider =
  */
 export type RouvaModel =
   // Anthropic
+  | 'claude-fable-5-2'
   | 'claude-fable-5-1'
   | 'claude-fable-5'
   | 'claude-opus-5-5'
@@ -127,7 +128,8 @@ export type RouvaModel =
   | 'gpt-6.1-terra'
   | 'gpt-6-sol'
   | 'gpt-6-luna'
-  // OpenAI — GPT-5 family
+  // OpenAI — GPT-5 family. OpenAI ends API access to gpt-5, gpt-5-mini and
+  // gpt-5-nano on 2026-12-11 (use the GPT-6 family); calls to them fail after that.
   | 'gpt-5.6-sol'
   | 'gpt-5.6-terra'
   | 'gpt-5.6-luna'
@@ -144,7 +146,8 @@ export type RouvaModel =
   | 'gpt-4.1-mini'
   | 'gpt-4o'
   | 'gpt-4o-mini'
-  // Gemini (gemini-4-argon: paid tier only)
+  // Gemini (gemini-4-argon and gemini-4-carbon: paid tier only)
+  | 'gemini-4-carbon'
   | 'gemini-4-argon'
   | 'gemini-3.8-flash'
   | 'gemini-3.7-flash'
@@ -183,6 +186,7 @@ export type RouvaModel =
   // Alibaba on 2026-10-10 and removed in 0.3.1)
   | 'qwen3.8-omni-flash'
   | 'qwen3.8-flash'
+  | 'qwen3.7-flash'
   | 'qwen3.7-plus'
   | 'qwen-max'
   | 'qwen-plus'
