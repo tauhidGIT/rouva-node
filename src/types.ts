@@ -62,6 +62,25 @@ export type ChatMessage =
   | ToolResultMessage
   | ContentBlockMessage
 
+/** `service_tier` values the gateway serves (see `ChatCompletionParams.service_tier`). */
+export type ServiceTier = 'auto' | 'default' | 'standard_only'
+
+/**
+ * Why Rouva itself refused a request (`RouvaError.refusal`, header
+ * `X-Rouva-Refusal`). See `RouvaError.refusal` for each kind. Other strings
+ * are allowed so a newer gateway's kinds still type-check.
+ */
+export type RouvaRefusal =
+  | 'key_cap'
+  | 'member_cap'
+  | 'customer_cap'
+  | 'plan_limit'
+  | 'rate'
+  | 'unpriced'
+  | 'unbounded'
+  | 'deadline'
+  | (string & {})
+
 export type RouvaProvider =
   | 'anthropic'
   | 'openai'
@@ -76,7 +95,7 @@ export type RouvaProvider =
   | (string & {})
 
 /**
- * Supported models across all providers (the gateway's list as of SDK 0.5.1).
+ * Supported models across all providers (the gateway's list as of SDK 0.5.2).
  * Omit `model` entirely to let Rouva route to the cheapest capable model automatically.
  *
  * Other IDs are accepted by the type for forward compatibility. On
@@ -139,7 +158,10 @@ export type RouvaModel =
   | 'deepseek-flash'
   | 'deepseek-flash-think'
   | 'deepseek-v4-pro'
-  // Mistral
+  // Mistral (mistral-large-latest still points to Mistral Large 3, which
+  // Mistral deprecated on 2026-10-31: Rouva no longer routes to it on its own,
+  // but a request that names it still reaches it; use mistral-large-4)
+  | 'mistral-large-4'
   | 'mistral-large-latest'
   | 'mistral-small-latest'
   // Moonshot (Kimi retires kimi-k2.6 by the end of December 2026; use kimi-k3.1-pro)
@@ -211,6 +233,15 @@ export interface ChatCompletionParams {
    * characters, values up to 256 characters, no null bytes.
    */
   metadata?: Record<string, string>
+  /**
+   * Which provider service tier to use. Rouva bills standard prices, so only
+   * the standard tier is served: `'default'` (OpenAI's name) or
+   * `'standard_only'` (Anthropic's) asks for it — sent in the dialect of
+   * whichever provider the request reaches; `'auto'` (the same as leaving it
+   * out) uses your provider account's own setting. Any other tier (`flex`,
+   * `priority`, `scale`, …) is a 400.
+   */
+  service_tier?: ServiceTier
   /**
    * Sampling temperature 0–1.
    * The gateway omits it for models that only accept their default: OpenAI
@@ -570,6 +601,23 @@ export interface RunParams {
    * all turns reaches this threshold.
    */
   session_budget_usd?: number
+  /**
+   * Your own labels for the run, stored with every turn's usage record and
+   * not sent to the provider (e.g. `{ customer_id: 'acme' }` for the
+   * dashboard's Customers page and per-customer spend caps): up to 10 string
+   * key-value pairs, keys up to 64 characters, values up to 256 characters,
+   * no null bytes.
+   */
+  metadata?: Record<string, string>
+  /**
+   * Which provider service tier to use. Rouva bills standard prices, so only
+   * the standard tier is served: `'default'` (OpenAI's name) or
+   * `'standard_only'` (Anthropic's) asks for it — sent in the dialect of
+   * whichever provider the request reaches; `'auto'` (the same as leaving it
+   * out) uses your provider account's own setting. Any other tier (`flex`,
+   * `priority`, `scale`, …) is a 400.
+   */
+  service_tier?: ServiceTier
 }
 
 export interface RunResult {

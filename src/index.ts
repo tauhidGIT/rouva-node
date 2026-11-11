@@ -11,6 +11,8 @@ export type {
   ResponseMessage,
   RouvaProvider,
   RouvaModel,
+  RouvaRefusal,
+  ServiceTier,
   SystemTextBlock,
   ChatCompletionParams,
   ChatCompletion,
