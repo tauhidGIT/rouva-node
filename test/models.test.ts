@@ -34,6 +34,13 @@ describe('RouvaModel', () => {
     expect(types).toContain(`| 'mistral-large-4'`)
   })
 
+  // 0.5.4: mistral-large-latest is Large 4 now (the gateway renames it, 2026-11-12).
+  it('mistral-large-latest is documented as Mistral Large 4, still a valid id', () => {
+    expect(types).toContain(`| 'mistral-large-latest'`)
+    expect(types).toMatch(/mistral-large-latest now points to Mistral Large 4/)
+    expect(types).not.toMatch(/points to Mistral Large 3/)
+  })
+
   // 0.5.3: models the gateway added 2026-11-11.
   it.each(['claude-fable-5-2', 'gemini-4-carbon', 'qwen3.7-flash'])('lists %s', (id) => {
     expect(types).toContain(`| '${id}'`)
