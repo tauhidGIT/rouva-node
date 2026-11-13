@@ -95,7 +95,7 @@ export type RouvaProvider =
   | (string & {})
 
 /**
- * Supported models across all providers (the gateway's list as of SDK 0.5.3).
+ * Supported models across all providers (the gateway's list as of SDK 0.5.4).
  * Omit `model` entirely to let Rouva route to the cheapest capable model automatically.
  *
  * Other IDs are accepted by the type for forward compatibility. On
@@ -161,9 +161,8 @@ export type RouvaModel =
   | 'deepseek-flash'
   | 'deepseek-flash-think'
   | 'deepseek-v4-pro'
-  // Mistral (mistral-large-latest still points to Mistral Large 3, which
-  // Mistral deprecated on 2026-10-31: Rouva no longer routes to it on its own,
-  // but a request that names it still reaches it; use mistral-large-4)
+  // Mistral (mistral-large-latest now points to Mistral Large 4: the gateway
+  // sends and prices it as mistral-large-4, since 2026-11-12)
   | 'mistral-large-4'
   | 'mistral-large-latest'
   | 'mistral-small-latest'
