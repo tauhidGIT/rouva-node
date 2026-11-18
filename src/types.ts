@@ -123,6 +123,8 @@ export type RouvaModel =
   | 'claude-haiku-5-5'
   | 'claude-haiku-4-5-20251001'
   // OpenAI — GPT-6 family
+  | 'gpt-6.2-astra'
+  | 'gpt-6.2-sol'
   | 'gpt-6-astra'
   | 'gpt-6.1-sol'
   | 'gpt-6.1-terra'
@@ -291,7 +293,7 @@ export interface ChatCompletionParams {
    * OpenAI models take it as is; Claude gets it as `output_config.effort`.
    * Values depend on the model: gpt-5 / -mini / -nano take minimal–high;
    * gpt-5.4-mini, gpt-5.6-*, gpt-6-luna / -sol, gpt-6.1-terra take none–xhigh;
-   * gpt-6.1-sol and gpt-6-astra low–xhigh; Claude Sonnet / Opus 4.6 low, medium,
+   * gpt-6.1-sol, gpt-6.2-sol / -astra and gpt-6-astra low–xhigh; Claude Sonnet / Opus 4.6 low, medium,
    * high, max; newer Claude models (incl. Haiku 5.5) also xhigh; GPT-4 models and Claude Haiku 4.5 don't take it. Routing
    * only picks a model that takes the value; a listed OpenAI or Claude model you
    * name that doesn't is a 400 (other providers' models get the value as sent). On gpt-6-luna / -sol and gpt-6.1-terra, `'none'` turns reasoning off (temperature,

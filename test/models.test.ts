@@ -34,6 +34,11 @@ describe('RouvaModel', () => {
     expect(types).toContain(`| 'mistral-large-4'`)
   })
 
+  // 0.5.5: GPT-6.2 Sol and GPT-6.2 Astra (gateway 2026-11-18).
+  it.each(['gpt-6.2-sol', 'gpt-6.2-astra'])('lists %s', (id) => {
+    expect(types).toContain(`| '${id}'`)
+  })
+
   // 0.5.4: mistral-large-latest is Large 4 now (the gateway renames it, 2026-11-12).
   it('mistral-large-latest is documented as Mistral Large 4, still a valid id', () => {
     expect(types).toContain(`| 'mistral-large-latest'`)
