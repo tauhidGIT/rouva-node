@@ -50,4 +50,9 @@ describe('RouvaModel', () => {
   it.each(['claude-fable-5-2', 'gemini-4-carbon', 'qwen3.7-flash'])('lists %s', (id) => {
     expect(types).toContain(`| '${id}'`)
   })
+
+  // 0.5.6: Gemini 4 Neon, added by the gateway 2026-11-20.
+  it('lists gemini-4-neon', () => {
+    expect(types).toContain(`| 'gemini-4-neon'`)
+  })
 })
