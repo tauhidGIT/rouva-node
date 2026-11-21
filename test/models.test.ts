@@ -55,4 +55,9 @@ describe('RouvaModel', () => {
   it('lists gemini-4-neon', () => {
     expect(types).toContain(`| 'gemini-4-neon'`)
   })
+
+  // 0.5.7: Gemini 4 Hydrogen, added by the gateway 2026-11-21.
+  it('lists gemini-4-hydrogen', () => {
+    expect(types).toContain(`| 'gemini-4-hydrogen'`)
+  })
 })

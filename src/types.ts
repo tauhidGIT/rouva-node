@@ -148,8 +148,9 @@ export type RouvaModel =
   | 'gpt-4.1-mini'
   | 'gpt-4o'
   | 'gpt-4o-mini'
-  // Gemini (gemini-4-neon, gemini-4-argon and gemini-4-carbon: paid tier only)
+  // Gemini (gemini-4-neon, gemini-4-hydrogen, gemini-4-argon and gemini-4-carbon: paid tier only)
   | 'gemini-4-neon'
+  | 'gemini-4-hydrogen'
   | 'gemini-4-carbon'
   | 'gemini-4-argon'
   | 'gemini-3.8-flash'
